@@ -3,15 +3,21 @@
 #include "hardware/spi.h"
 #include "hardware/pwm.h"
 
+#include <cmath>
 //driver pins
 #define _PWM_A_PIN 13
 #define _PWM_B_PIN 14
 #define _PWM_C_PIN 15
 #define _DRIVER_ENABLE_PIN 12
 
-class driver{
+//stepper pins
+#define _STEP_PIN 1
+#define _DIR_PIN 0
+
+#define deg_per_step 1.8
+class foc_driver{
     public:
-        driver(uint pin_a, uint pin_b, uint pin_c, uint pin_enable, uint pwm_freq=50000){
+        foc_driver(uint pin_a, uint pin_b, uint pin_c, uint pin_enable, uint pwm_freq=50000){
             pin_A = pin_a;
             pin_B = pin_b;
             pin_C = pin_c;
@@ -68,21 +74,156 @@ class driver{
             return (125000000/freq);
         }
 };  
- 
+
+// class for A4988 stepper driver
+class stepper_driver{
+    public:
+        stepper_driver(uint step_pin, uint dir_pin, float hw_angle_per_step=1.8,uint microstepping_mult=1,bool invert_dir=false){
+            this->step_pin=step_pin;
+            this->dir_pin=dir_pin;
+            this->hw_angle_per_step=hw_angle_per_step;
+            this->microstepping_mult=microstepping_mult;
+            angle_per_step=hw_angle_per_step/microstepping_mult;
+            this->invert_dir=invert_dir;
+
+            gpio_init(step_pin);
+            gpio_set_dir(step_pin,GPIO_OUT);
+            gpio_put(step_pin,0);
+            gpio_init(dir_pin);
+            gpio_set_dir(dir_pin,GPIO_OUT);
+            gpio_put(dir_pin,0);
+
+            //this accounts for microstepping
+            steps_per_rot=360/angle_per_step;
+            zero_motor();
+        }
+        enum direction{
+            CW=0,
+            CCW=1
+        };
+        // function to set direction
+        void set_dir(direction dir){
+            gpio_put(dir_pin,dir^invert_dir);
+            sleep_us(5);
+        }
+        //function that takes ones step
+        void step(){
+            gpio_put(step_pin,1);
+            sleep_us(10);
+            gpio_put(step_pin,0);
+            sleep_us(10);
+        }
+        // function to move stepper by steps in a direction with acceleration and deceleration
+        void move(uint nr_steps,direction dir){
+            increment_position(nr_steps,dir);
+            set_dir(dir);
+            curve c(nr_steps,microstepping_mult);
+            for(int i=0;i<nr_steps;i++){
+                step();
+                printf("%d\n",c.calculate_delay(i));
+                sleep_us(c.calculate_delay(i));
+            }
+        }
+        // function to zero stepper with a limit switch
+        void zero_motor(){
+            absolute_position_steps=0;
+        }
+        uint get_absolute_position(){
+            return absolute_position_steps;
+        }
+
+        private:
+        uint step_pin;
+        uint dir_pin;
+        float hw_angle_per_step;
+        float angle_per_step;
+        uint microstepping_mult;
+        bool invert_dir;
+        uint steps_per_rot;
+
+        //curve variables
+        class curve{
+            public:
+                curve(uint steps_total,uint microstepping_mult,uint min_delay=1500,uint max_delay=9000,uint accel_decel_phase_steps=500){
+                    this->min_delay=min_delay/microstepping_mult;
+                    this->max_delay=max_delay/microstepping_mult;
+                    this->accel_decel_phase_steps=accel_decel_phase_steps;
+                    this->steps_total=steps_total;
+                    if(steps_total<2*accel_decel_phase_steps){
+                        this->accel_decel_phase_steps=steps_total/2;
+                    }
+                }
+                // this returns the delay needed for the acceleration/deceleration curve at the specified index.
+                uint calculate_delay(uint step_index){
+                    if(step_index < accel_decel_phase_steps){
+                        // Acceleration phase
+                        float factor = static_cast<float>(step_index) / accel_decel_phase_steps;
+                        return max_delay - static_cast<uint>((max_delay - min_delay) * factor);
+                    }
+                    else if(step_index >= steps_total - accel_decel_phase_steps){
+                        // Deceleration phase
+                        float factor = static_cast<float>(step_index - (steps_total - accel_decel_phase_steps)) / accel_decel_phase_steps;
+                        return min_delay + static_cast<uint>((max_delay - min_delay) * factor);
+                    }
+                    else{
+                        // Constant speed phase
+                        return min_delay;
+                    }
+                }
+            private:
+                uint min_delay; //(us- microseconds)this changes the actual speed of the motor rotation. might want to add a helper funtion to calc delay as a funtion of rot/sec delaythis should not be lower or the motor stalls; it might be better with the curves implemented; please check
+                uint max_delay; //(us- microseconds)change this if you want; this changes the minimum speed of the motor's acceleration/deceleration
+                uint accel_decel_phase_steps; //change this to make the acceleration/deceleration longer or shorter; phases lenght is equal.
+                uint steps_total;
+            };
+        // function calculates the delay needed for acceleration/deceleration curves
+        // this function returns the number of steps needed to move a certain number of mm; steps are an integer, so it's going to get rounded probably...
+        uint mm_to_steps(float mm){
+            //76.2mm/rot for the roller chain (mybe has to be calibrated)
+            float mm_per_rot=76.2; //placeholder, please check calibration if it's correct
+            return static_cast<uint>((mm/mm_per_rot)*steps_per_rot);
+        }
+
+        uint absolute_position_steps;
+        //this should be uint but comparing it with an int promotes the int to uint and the comparison is always true
+        int max_position_steps = 3000; //placeholder
+        //this function adds or subtracts steps from absolute position counter
+        void increment_position(uint steps,direction dir){
+            //cw is pos, ccw is neg
+            // int newpos=position_steps+steps*(dir==CW?1:-1);
+            int newpos=absolute_position_steps+steps*(dir==CW?1:-1);
+            if(newpos>max_position_steps){
+                newpos-=max_position_steps;
+            }
+            else if(newpos<0){
+                newpos+=max_position_steps;
+            }
+            absolute_position_steps=newpos;
+        }   
+
+};
+
 int main()
 {
     stdio_init_all();
     sleep_ms(1000);
-    driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
+    foc_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
+    stepper_driver stp(_STEP_PIN,_DIR_PIN,1.8,4);
+
     float i=0;
-    drv.enable();
+    // drv.enable();
+    stp.set_dir(stepper_driver::CW);
+    // stp.move(400,stepper_driver::CW);
     while (true) {
-        // printf("Duty: %.2f\n",i*100);
-        i+=0.0005;
-        if(i>1){
-            i-=1;
-        }
-        drv.set_pwm_duty(i);
-        sleep_ms(1);
+        // // drv.set_pwm_duty(i);
+        // for(int i=0;i<5000;i++){
+        //     stp.step();
+        //     sleep_us(5000);
+        // }
+        // sleep_us(1);
+        stp.move((int)5*200*4,stepper_driver::CCW);
+        sleep_ms(100);
+        stp.move((int)5*200*4,stepper_driver::CW);
+        sleep_ms(100);
     }
 }
