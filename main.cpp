@@ -128,12 +128,16 @@ class stepper_driver{
             current_step=0;
             moving=true;
             this->nr_steps=nr_steps;
+            next_step_time=time_us_32()+c.calculate_delay(current_step);
         }
         void loop(){
             if(current_step<nr_steps && moving){
-                step();
-                sleep_us(c.calculate_delay(current_step));
-                current_step++;
+                uint current_time=time_us_32();
+                if(current_time>=next_step_time){
+                    step();
+                    current_step++;
+                    next_step_time=current_time+c.calculate_delay(current_step);
+                }
             }
             else{
                 moving=false;
@@ -158,11 +162,12 @@ class stepper_driver{
 
         uint current_step;
         uint nr_steps;
+        uint32_t next_step_time;
 
         //curve variables
         class curve{
             public:
-                void init(uint microstepping_mult,uint min_delay=1500,uint max_delay=9000,uint accel_decel_phase_steps=500){
+                void init(uint microstepping_mult,uint min_delay=4000,uint max_delay=8000,uint accel_decel_phase_steps=500){
                     this->min_delay=min_delay/microstepping_mult;
                     this->max_delay=max_delay/microstepping_mult;
                     this->accel_decel_phase_steps=accel_decel_phase_steps;
@@ -229,8 +234,8 @@ int main()
     stdio_init_all();
     sleep_ms(1000);
     foc_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
-    stepper_driver stp1(_STEP_PINA,_DIR_PINA,1.8,4);
-    stepper_driver stp2(_STEP_PINB,_DIR_PINB,1.8,4);
+    stepper_driver stp1(_STEP_PINA,_DIR_PINA,1.8,2);
+    stepper_driver stp2(_STEP_PINB,_DIR_PINB,1.8,2);
     
     // drv.enable();
     stp1.set_dir(stepper_driver::CW);
@@ -248,11 +253,11 @@ int main()
                 stp2.move((int)15*200*4,stepper_driver::CW);
             }
             else{
-                stp1.move((int)5*200*4,stepper_driver::CW);
+                // stp1.move((int)5*200*4,stepper_driver::CW);
                 stp2.move((int)15*200*4,stepper_driver::CCW);
             }
             i=!i;
         }
-        sleep_us(100);
+        sleep_us(1);
     }
 }
