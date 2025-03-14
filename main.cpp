@@ -11,8 +11,10 @@
 #define _DRIVER_ENABLE_PIN 12
 
 //stepper pins
-#define _STEP_PIN 1
-#define _DIR_PIN 0
+#define _STEP_PINA 1
+#define _DIR_PINA 0
+#define _STEP_PINB 3
+#define _DIR_PINB 2
 
 #define deg_per_step 1.8
 class foc_driver{
@@ -78,6 +80,7 @@ class foc_driver{
 // class for A4988 stepper driver
 class stepper_driver{
     public:
+        bool moving;
         stepper_driver(uint step_pin, uint dir_pin, float hw_angle_per_step=1.8,uint microstepping_mult=1,bool invert_dir=false){
             this->step_pin=step_pin;
             this->dir_pin=dir_pin;
@@ -85,6 +88,7 @@ class stepper_driver{
             this->microstepping_mult=microstepping_mult;
             angle_per_step=hw_angle_per_step/microstepping_mult;
             this->invert_dir=invert_dir;
+            this->moving=false;
 
             gpio_init(step_pin);
             gpio_set_dir(step_pin,GPIO_OUT);
@@ -93,6 +97,7 @@ class stepper_driver{
             gpio_set_dir(dir_pin,GPIO_OUT);
             gpio_put(dir_pin,0);
 
+            c.init(microstepping_mult);
             //this accounts for microstepping
             steps_per_rot=360/angle_per_step;
             zero_motor();
@@ -101,9 +106,11 @@ class stepper_driver{
             CW=0,
             CCW=1
         };
+        direction current_dir;
         // function to set direction
         void set_dir(direction dir){
             gpio_put(dir_pin,dir^invert_dir);
+            current_dir=dir;
             sleep_us(5);
         }
         //function that takes ones step
@@ -117,11 +124,19 @@ class stepper_driver{
         void move(uint nr_steps,direction dir){
             increment_position(nr_steps,dir);
             set_dir(dir);
-            curve c(nr_steps,microstepping_mult);
-            for(int i=0;i<nr_steps;i++){
+            c.change_curve(nr_steps);
+            current_step=0;
+            moving=true;
+            this->nr_steps=nr_steps;
+        }
+        void loop(){
+            if(current_step<nr_steps && moving){
                 step();
-                printf("%d\n",c.calculate_delay(i));
-                sleep_us(c.calculate_delay(i));
+                sleep_us(c.calculate_delay(current_step));
+                current_step++;
+            }
+            else{
+                moving=false;
             }
         }
         // function to zero stepper with a limit switch
@@ -141,13 +156,19 @@ class stepper_driver{
         bool invert_dir;
         uint steps_per_rot;
 
+        uint current_step;
+        uint nr_steps;
+
         //curve variables
         class curve{
             public:
-                curve(uint steps_total,uint microstepping_mult,uint min_delay=1500,uint max_delay=9000,uint accel_decel_phase_steps=500){
+                void init(uint microstepping_mult,uint min_delay=1500,uint max_delay=9000,uint accel_decel_phase_steps=500){
                     this->min_delay=min_delay/microstepping_mult;
                     this->max_delay=max_delay/microstepping_mult;
                     this->accel_decel_phase_steps=accel_decel_phase_steps;
+                }
+                // this function is used when you want to change the curve for example inside the move function of the stepper
+                void change_curve(uint steps_total){
                     this->steps_total=steps_total;
                     if(steps_total<2*accel_decel_phase_steps){
                         this->accel_decel_phase_steps=steps_total/2;
@@ -175,7 +196,7 @@ class stepper_driver{
                 uint max_delay; //(us- microseconds)change this if you want; this changes the minimum speed of the motor's acceleration/deceleration
                 uint accel_decel_phase_steps; //change this to make the acceleration/deceleration longer or shorter; phases lenght is equal.
                 uint steps_total;
-            };
+        } c;
         // function calculates the delay needed for acceleration/deceleration curves
         // this function returns the number of steps needed to move a certain number of mm; steps are an integer, so it's going to get rounded probably...
         uint mm_to_steps(float mm){
@@ -208,22 +229,30 @@ int main()
     stdio_init_all();
     sleep_ms(1000);
     foc_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
-    stepper_driver stp(_STEP_PIN,_DIR_PIN,1.8,4);
-
-    float i=0;
+    stepper_driver stp1(_STEP_PINA,_DIR_PINA,1.8,4);
+    stepper_driver stp2(_STEP_PINB,_DIR_PINB,1.8,4);
+    
     // drv.enable();
-    stp.set_dir(stepper_driver::CW);
-    // stp.move(400,stepper_driver::CW);
+    stp1.set_dir(stepper_driver::CW);
+    stp2.set_dir(stepper_driver::CW);
+    
+    int i=0;
     while (true) {
+        stp1.loop();
+        stp2.loop();
         // // drv.set_pwm_duty(i);
-        // for(int i=0;i<5000;i++){
-        //     stp.step();
-        //     sleep_us(5000);
-        // }
-        // sleep_us(1);
-        stp.move((int)5*200*4,stepper_driver::CCW);
-        sleep_ms(100);
-        stp.move((int)5*200*4,stepper_driver::CW);
-        sleep_ms(100);
+        if(!stp1.moving && !stp2.moving){
+            sleep_ms(1000);
+            if(i){
+                stp1.move((int)5*200*4,stepper_driver::CCW);
+                stp2.move((int)15*200*4,stepper_driver::CW);
+            }
+            else{
+                stp1.move((int)5*200*4,stepper_driver::CW);
+                stp2.move((int)15*200*4,stepper_driver::CCW);
+            }
+            i=!i;
+        }
+        sleep_us(100);
     }
 }
