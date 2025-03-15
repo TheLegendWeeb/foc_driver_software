@@ -232,12 +232,12 @@ class stepper_driver{
 int main()
 {
     stdio_init_all();
-    sleep_ms(1000);
-    foc_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
-    stepper_driver stp1(_STEP_PINA,_DIR_PINA,1.8,2);
-    stepper_driver stp2(_STEP_PINB,_DIR_PINB,1.8,2);
+    // sleep_ms(1000);
+    // foc_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
+    stepper_driver stp1(_STEP_PINA,_DIR_PINA,1.8,4);
+    stepper_driver stp2(_STEP_PINB,_DIR_PINB,1.8,4);
     
-    // drv.enable();
+    // // drv.enable();
     stp1.set_dir(stepper_driver::CW);
     stp2.set_dir(stepper_driver::CW);
     
@@ -250,14 +250,23 @@ int main()
             sleep_ms(1000);
             if(i){
                 stp1.move((int)5*200*4,stepper_driver::CCW);
-                stp2.move((int)15*200*4,stepper_driver::CW);
+                stp2.move((int)5*200*4,stepper_driver::CW);
             }
             else{
-                // stp1.move((int)5*200*4,stepper_driver::CW);
-                stp2.move((int)15*200*4,stepper_driver::CCW);
+                stp1.move((int)5*200*4,stepper_driver::CW);
+                stp2.move((int)5*200*4,stepper_driver::CCW);
             }
             i=!i;
         }
         sleep_us(1);
     }
+    // for(;;){
+    //     gpio_put(_STEP_PINA,1);
+    //     gpio_put(_STEP_PINB,1);
+    //     sleep_us(16);
+    //     gpio_put(_STEP_PINA,0);
+    //     gpio_put(_STEP_PINB,0);
+    //     sleep_us(16);
+    //     sleep_ms(1.5);
+    // }
 }
