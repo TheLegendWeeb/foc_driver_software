@@ -16,7 +16,10 @@
 #define _STEP_PINB 3
 #define _DIR_PINB 2
 
-#define deg_per_step 1.8
+#define _LIMIT_SWITCH_RIGHT 4
+#define _LIMIT_SWITCH_LEFT 5
+
+// class for FOC driver
 class foc_driver{
     public:
         foc_driver(uint pin_a, uint pin_b, uint pin_c, uint pin_enable, uint pwm_freq=50000){
@@ -77,11 +80,43 @@ class foc_driver{
         }
 };  
 
+// limit switch stuff
+#define DEBOUNCE_DELAY_MS 500
+volatile bool g_limit_switch_right_triggered=false;
+volatile bool g_limit_switch_left_triggered=false;
+volatile uint32_t last_debounce_time_right = 0;
+volatile uint32_t last_debounce_time_left = 0;
+void limit_switch_callback(uint gpio, uint32_t events){
+    uint32_t current_time = time_us_32();
+    if(gpio==_LIMIT_SWITCH_RIGHT){
+        if (current_time - last_debounce_time_right > DEBOUNCE_DELAY_MS) {
+            printf("right        ");
+            g_limit_switch_right_triggered = true;
+            last_debounce_time_right = current_time;
+        }
+    }
+    else if(gpio==_LIMIT_SWITCH_LEFT){
+        if (current_time - last_debounce_time_left > DEBOUNCE_DELAY_MS) {
+            printf("left");
+            g_limit_switch_left_triggered = true;
+            last_debounce_time_left = current_time;
+        }
+    }
+    // printf("    %d\n",time_us_32());
+}
+void add_limit_switch(uint pin){
+    gpio_init(pin);
+    gpio_set_dir(pin,GPIO_IN);
+    gpio_pull_up(pin);
+    gpio_set_irq_enabled_with_callback(pin, GPIO_IRQ_EDGE_FALL, true, limit_switch_callback);
+}
+
 // class for A4988 stepper driver
 class stepper_driver{
     public:
+        uint absolute_position_steps;
         bool moving;
-        stepper_driver(uint step_pin, uint dir_pin, float hw_angle_per_step=1.8,uint microstepping_mult=1,bool invert_dir=false){
+        stepper_driver(uint step_pin, uint dir_pin,volatile bool* asoc_limit_switch,float hw_angle_per_step=1.8,uint microstepping_mult=1,bool invert_dir=false){
             this->step_pin=step_pin;
             this->dir_pin=dir_pin;
             this->hw_angle_per_step=hw_angle_per_step;
@@ -89,6 +124,7 @@ class stepper_driver{
             angle_per_step=hw_angle_per_step/microstepping_mult;
             this->invert_dir=invert_dir;
             this->moving=false;
+            this->asoc_limit_switch=asoc_limit_switch;
 
             gpio_init(step_pin);
             gpio_set_dir(step_pin,GPIO_OUT);
@@ -130,6 +166,7 @@ class stepper_driver{
             this->nr_steps=nr_steps;
             next_step_time=time_us_32()+c.calculate_delay(current_step);
         }
+        // main loop function (has to be called continouusly)
         void loop(){
             if(current_step<nr_steps && moving){
                 uint current_time=time_us_32();
@@ -143,12 +180,47 @@ class stepper_driver{
                 moving=false;
             }
         }
+
+        //moves the chain by a certain number of mm (rounded to the nearest step)
+        void move_mm(float mm,direction dir){
+            uint steps=mm_to_steps(mm);
+            move(steps,dir);
+            absolute_position_steps+=(steps*(dir==CW?1:-1));
+        }
         // function to zero stepper with a limit switch
         void zero_motor(){
+            uint delay_stage_1=1000;
+            uint delay_stage_2=5000;
+            uint delay_stage_3=10000;
+            set_dir(CW);
+            while(!*asoc_limit_switch){
+                step();
+                sleep_us(delay_stage_1);
+            }
+            set_dir(CCW);
+            for(int i=0;i<mm_to_steps(80);i++){
+                step();
+                sleep_us(delay_stage_1);
+            }
+            //found true limit
+            set_dir(CW);
+            *asoc_limit_switch=false;
+            while(!*asoc_limit_switch){
+                step();
+                sleep_us(delay_stage_1);
+            }
+            set_dir(CCW);
+            for(int i=0;i<mm_to_steps(10);i++){
+                step();
+                sleep_us(delay_stage_2);
+            }
+            set_dir(CW);
+            *asoc_limit_switch=false;
+            while(!*asoc_limit_switch){
+                step();
+                sleep_us(delay_stage_3);
+            }
             absolute_position_steps=0;
-        }
-        uint get_absolute_position(){
-            return absolute_position_steps;
         }
 
         private:
@@ -163,8 +235,9 @@ class stepper_driver{
         uint current_step;
         uint nr_steps;
         uint32_t next_step_time;
+        volatile bool *asoc_limit_switch;
 
-        //curve variables
+        //curve for acceleration/deceleration
         class curve{
             public:
                 void init(uint microstepping_mult,uint min_delay=4000,uint max_delay=8000,uint accel_decel_phase_steps=500){
@@ -202,15 +275,17 @@ class stepper_driver{
                 uint accel_decel_phase_steps; //change this to make the acceleration/deceleration longer or shorter; phases lenght is equal.
                 uint steps_total;
         } c;
+
         // function calculates the delay needed for acceleration/deceleration curves
         // this function returns the number of steps needed to move a certain number of mm; steps are an integer, so it's going to get rounded probably...
+        const float mm_per_rot=77; //placeholder, please check calibration if it's correct  ; checked and seems right aprox
         uint mm_to_steps(float mm){
-            //76.2mm/rot for the roller chain (mybe has to be calibrated)
-            float mm_per_rot=76.2; //placeholder, please check calibration if it's correct
-            return static_cast<uint>((mm/mm_per_rot)*steps_per_rot);
+            return static_cast<uint>(std::round((mm/mm_per_rot)*steps_per_rot));
         }
-
-        uint absolute_position_steps;
+        //reverse of steps_to_mm
+        float steps_to_mm(uint steps){
+            return ((float)steps/steps_per_rot)*mm_per_rot;
+        }
         //this should be uint but comparing it with an int promotes the int to uint and the comparison is always true
         int max_position_steps = 3000; //placeholder
         //this function adds or subtracts steps from absolute position counter
@@ -234,39 +309,40 @@ int main()
     stdio_init_all();
     // sleep_ms(1000);
     // foc_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
-    stepper_driver stp1(_STEP_PINA,_DIR_PINA,1.8,4);
-    stepper_driver stp2(_STEP_PINB,_DIR_PINB,1.8,4);
+    add_limit_switch(_LIMIT_SWITCH_RIGHT);
+    add_limit_switch(_LIMIT_SWITCH_LEFT);
+    sleep_ms(3000);
+    stepper_driver stp1(_STEP_PINA,_DIR_PINA,&g_limit_switch_left_triggered,1.8,4);
+    // stepper_driver stp2(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4);
     
     // // drv.enable();
     stp1.set_dir(stepper_driver::CW);
-    stp2.set_dir(stepper_driver::CW);
-    
+    // stp2.set_dir(stepper_driver::CW);
+    // stp1.move_mm(50,stepper_driver::CCW);
+    // stp2.move(200*4,stepper_driver::CCW);
     int i=0;
     while (true) {
-        stp1.loop();
-        stp2.loop();
-        // // drv.set_pwm_duty(i);
-        if(!stp1.moving && !stp2.moving){
-            sleep_ms(1000);
-            if(i){
-                stp1.move((int)5*200*4,stepper_driver::CCW);
-                stp2.move((int)5*200*4,stepper_driver::CW);
-            }
-            else{
-                stp1.move((int)5*200*4,stepper_driver::CW);
-                stp2.move((int)5*200*4,stepper_driver::CCW);
-            }
-            i=!i;
+        // stp1.loop();
+        // stp2.loop();
+        // // // drv.set_pwm_duty(i);
+        // if(!stp1.moving && !stp2.moving){
+        //     sleep_ms(1000);
+        //     if(i){
+        //         stp1.move((int)5*200*4,stepper_driver::CCW);
+        //         stp2.move((int)5*200*4,stepper_driver::CW);
+        //     }
+        //     else{
+        //         stp1.move((int)5*200*4,stepper_driver::CW);
+        //         stp2.move((int)5*200*4,stepper_driver::CCW);
+        //     }
+        //     i=!i;
+        // }
+        if(g_limit_switch_right_triggered){
+            g_limit_switch_right_triggered=false;
+        }
+        if(g_limit_switch_left_triggered){
+            g_limit_switch_left_triggered=false;
         }
         sleep_us(1);
     }
-    // for(;;){
-    //     gpio_put(_STEP_PINA,1);
-    //     gpio_put(_STEP_PINB,1);
-    //     sleep_us(16);
-    //     gpio_put(_STEP_PINA,0);
-    //     gpio_put(_STEP_PINB,0);
-    //     sleep_us(16);
-    //     sleep_ms(1.5);
-    // }
 }
