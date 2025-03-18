@@ -4,6 +4,7 @@
 #include "hardware/pwm.h"
 
 #include <cmath>
+#include <cstring>
 //driver pins
 #define _PWM_A_PIN 13
 #define _PWM_B_PIN 14
@@ -16,6 +17,7 @@
 #define _STEP_PINB 3
 #define _DIR_PINB 2
 
+//limit switch pins
 #define _LIMIT_SWITCH_RIGHT 4
 #define _LIMIT_SWITCH_LEFT 5
 
@@ -50,9 +52,9 @@ class foc_driver{
 
             gpio_init(pin_EN);
             gpio_set_dir(pin_EN,GPIO_OUT);
-            gpio_put(pin_EN,0);
+            disable();  //default disabled
         }
-        //enable the driver
+        //enable the driver idk if it needs delays
         void enable(){
             gpio_put(pin_EN,1);
         }
@@ -60,8 +62,10 @@ class foc_driver{
         void disable(){
             gpio_put(pin_EN,0);
         }
-        void set_pwm_duty(float duty){
-            pwm_set_gpio_level(pin_A,duty*pwm_wrap);
+        void set_pwm_duty(float dutyA,float dutyB,float dutyC){
+            pwm_set_gpio_level(pin_A,dutyA*pwm_wrap);
+            pwm_set_gpio_level(pin_B,dutyB*pwm_wrap);
+            pwm_set_gpio_level(pin_C,dutyC*pwm_wrap);
         }
     private:
         uint pin_A;
@@ -90,14 +94,14 @@ void limit_switch_callback(uint gpio, uint32_t events){
     uint32_t current_time = time_us_32();
     if(gpio==_LIMIT_SWITCH_RIGHT){
         if (current_time - last_debounce_time_right > DEBOUNCE_DELAY_MS) {
-            printf("right        ");
+            // printf("right        ");
             g_limit_switch_right_triggered = true;
             last_debounce_time_right = current_time;
         }
     }
     else if(gpio==_LIMIT_SWITCH_LEFT){
         if (current_time - last_debounce_time_left > DEBOUNCE_DELAY_MS) {
-            printf("left");
+            // printf("left");
             g_limit_switch_left_triggered = true;
             last_debounce_time_left = current_time;
         }
@@ -136,7 +140,7 @@ class stepper_driver{
             c.init(microstepping_mult);
             //this accounts for microstepping
             steps_per_rot=360/angle_per_step;
-            zero_motor();
+            zero_motor();//maybe dont zero in the constructor
         }
         enum direction{
             CW=0,
@@ -221,6 +225,8 @@ class stepper_driver{
                 sleep_us(delay_stage_3);
             }
             absolute_position_steps=0;
+            //now go to center position
+
         }
 
         private:
@@ -287,7 +293,7 @@ class stepper_driver{
             return ((float)steps/steps_per_rot)*mm_per_rot;
         }
         //this should be uint but comparing it with an int promotes the int to uint and the comparison is always true
-        int max_position_steps = 3000; //placeholder
+        int max_position_steps = 3500; //placeholder 111111111111!!!!!!!!!!!!!!!
         //this function adds or subtracts steps from absolute position counter
         void increment_position(uint steps,direction dir){
             //cw is pos, ccw is neg
@@ -308,23 +314,61 @@ int main()
 {
     stdio_init_all();
     // sleep_ms(1000);
-    // foc_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
+    foc_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
     add_limit_switch(_LIMIT_SWITCH_RIGHT);
     add_limit_switch(_LIMIT_SWITCH_LEFT);
     sleep_ms(3000);
     stepper_driver stp1(_STEP_PINA,_DIR_PINA,&g_limit_switch_left_triggered,1.8,4);
-    // stepper_driver stp2(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4);
+    stepper_driver stp2(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4);
     
-    // // drv.enable();
-    stp1.set_dir(stepper_driver::CW);
+    drv.enable();
+    // stp1.set_dir(stepper_driver::CW);
     // stp2.set_dir(stepper_driver::CW);
     // stp1.move_mm(50,stepper_driver::CCW);
     // stp2.move(200*4,stepper_driver::CCW);
-    int i=0;
+    // int sixstepdelay=10;
     while (true) {
-        // stp1.loop();
-        // stp2.loop();
-        // // // drv.set_pwm_duty(i);
+        char buffer[100];
+        int increment;
+        if(!stp1.moving){
+            //i have to figure out how to find out the number of steps for a full cycle
+            // mayve I keep adding uintil we pass the limit switch and then add a command that goes backwards until it finds the limit switch
+            printf("CURRENT STEPS  %d\n",stp1.absolute_position_steps);
+            fgets(buffer, sizeof(buffer), stdin);
+            if(strcmp(buffer,"back\n")==0){
+                stp1.set_dir(stepper_driver::CW);
+                while(!g_limit_switch_left_triggered){
+                    stp1.step();
+                    sleep_us(5000);
+                    stp1.absolute_position_steps++;
+                }
+                printf("FOUND TOTAL LENGHT: %d\n",stp1.absolute_position_steps);
+            }
+            else{
+                increment=atoi(buffer);
+                printf("MOVING %d steps\n",increment);
+                stepper_driver::direction newdir=increment>0?stepper_driver::CW:stepper_driver::CCW;
+                increment= abs(increment);
+                stp1.move(increment,newdir);
+            }
+        }
+        // //six step commutation test
+        // drv.set_pwm_duty(1,0,0);
+        // sleep_ms(sixstepdelay);
+        // drv.set_pwm_duty(1,1,0);
+        // sleep_ms(sixstepdelay);
+        // drv.set_pwm_duty(0,1,0);
+        // sleep_ms(sixstepdelay);
+        // drv.set_pwm_duty(0,1,1);
+        // sleep_ms(sixstepdelay);
+        // drv.set_pwm_duty(0,0,1);
+        // sleep_ms(sixstepdelay);
+        // drv.set_pwm_duty(1,0,1);
+        // sleep_ms(sixstepdelay);
+
+
+        stp1.loop();
+        stp2.loop();
         // if(!stp1.moving && !stp2.moving){
         //     sleep_ms(1000);
         //     if(i){
