@@ -294,6 +294,7 @@ class stepper_driver{
         }
         //this should be uint but comparing it with an int promotes the int to uint and the comparison is always true
         int max_position_steps = 3500; //placeholder 111111111111!!!!!!!!!!!!!!!
+        int offset_other_tooth; //placeholder this is the offset in case i want to zero from the other side
         //this function adds or subtracts steps from absolute position counter
         void increment_position(uint steps,direction dir){
             //cw is pos, ccw is neg
