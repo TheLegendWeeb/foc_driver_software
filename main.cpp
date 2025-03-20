@@ -5,6 +5,13 @@
 
 #include <cmath>
 #include <cstring>
+
+// SPI Defines
+#define _PIN_MISO 16
+#define _PIN_CS   17  //for encoder
+#define _PIN_SCK  18
+#define _PIN_MOSI 19
+
 //driver pins
 #define _PWM_A_PIN 13
 #define _PWM_B_PIN 14
@@ -21,10 +28,71 @@
 #define _LIMIT_SWITCH_RIGHT 4
 #define _LIMIT_SWITCH_LEFT 5
 
-// class for FOC driver
-class foc_driver{
+//Util values defs
+#define _2PI     6.2831853072
+#define _PIover3 1.0471975512
+#define _SQRT3   1.7320508075
+
+//useful functions
+
+//this clamps an angle to the 0 to 2PI range
+float clamp_rad(float angle_rad){
+    angle_rad=fmod(angle_rad,_2PI);
+    if(angle_rad<0)
+        angle_rad+=_2PI;
+    return angle_rad;
+}
+
+// spi encoder class
+class encoder{
+    // TODO: Add possibility to send offset to sensor
+    // Add functions for continuous angles
     public:
-        foc_driver(uint pin_a, uint pin_b, uint pin_c, uint pin_enable, uint pwm_freq=50000){
+        // class constructor
+        encoder(spi_inst_t *spi_channel,uint sck_pin,uint cs_pin, uint miso_pin, uint mosi_pin){
+            spi_init(spi_channel,1000*1000); // spi @ 1MHZ
+            spi_set_format(spi_channel,16,SPI_CPOL_0,SPI_CPHA_1,SPI_MSB_FIRST); //mode 1 spi, 16 bit
+            gpio_set_function(miso_pin, GPIO_FUNC_SPI);
+            gpio_set_function(sck_pin,  GPIO_FUNC_SPI);
+            gpio_set_function(mosi_pin, GPIO_FUNC_SPI);
+
+            this->cs_pin=cs_pin;
+            this->spi_channel=spi_channel;
+            gpio_init(cs_pin);
+            gpio_set_dir(cs_pin, GPIO_OUT);
+            gpio_put(cs_pin, 1);
+        }
+        // returns angle in int form
+        uint16_t get_angle(){ //first read sends the read command and the second has the data
+            uint16_t angle_int;
+            gpio_put(cs_pin,0);
+            spi_write16_read16_blocking(spi_channel,&ANGLE_READ_COMMAND,&angle_int,1);
+            gpio_put(cs_pin,1);
+            sleep_us(1);//delay for transmission
+            gpio_put(cs_pin,0);
+            spi_write16_read16_blocking(spi_channel,&ANGLE_READ_COMMAND,&angle_int,1);
+            gpio_put(cs_pin,1);
+            angle_int=angle_int & 0b0011111111111111;
+            return angle_int;
+        }
+        // returns angle in DEG
+        float get_angle_deg(){
+            return (float)get_angle()/16384.0*360.0;   //16384 is the number of pulses per rotation (cpr)
+        }
+        //returns angle in RAD
+        float get_angle_rad(){
+            return (float)get_angle()/16384.0*_2PI;
+        }
+    private:
+        uint cs_pin;
+        spi_inst_t* spi_channel;
+        const uint16_t ANGLE_READ_COMMAND=0xFFFF;
+};
+
+// class for the 1/2 bridge drv8318 driver
+class bridge_driver{
+    public:
+        bridge_driver(uint pin_a, uint pin_b, uint pin_c, uint pin_enable, uint pwm_freq=50000){ //default 50kHz frequency
             pin_A = pin_a;
             pin_B = pin_b;
             pin_C = pin_c;
@@ -37,18 +105,18 @@ class foc_driver{
             slice_A=pwm_gpio_to_slice_num(pin_A);
             slice_B=pwm_gpio_to_slice_num(pin_B);
             slice_C=pwm_gpio_to_slice_num(pin_C);
-
             pwm_config conf=pwm_get_default_config();
             pwm_wrap=calc_wrap(pwm_freq);
+            pwm_config_set_phase_correct(&conf,true); // the pwm uses a numerical comparator, but this is similar to making our carrier wave a triangle wave instead of a sawtooth, but it also halves our calculated frequency, so it has to be adjusted (halve wrap)
             pwm_config_set_wrap(&conf, pwm_wrap);
             pwm_config_set_clkdiv(&conf,1.0);
-            pwm_init(slice_A, &conf, true);
-            pwm_init(slice_B, &conf, true);
-            pwm_init(slice_C, &conf, true);
-
-            pwm_set_enabled(slice_A, true);
-            pwm_set_enabled(slice_B, true);
-            pwm_set_enabled(slice_C, true);
+            pwm_init(slice_A, &conf, false);
+            pwm_init(slice_B, &conf, false);
+            pwm_init(slice_C, &conf, false);
+            pwm_set_counter(slice_A,0);
+            pwm_set_counter(slice_B,0);
+            pwm_set_counter(slice_C,0);
+            pwm_set_mask_enabled((1<<slice_A) | (1<<slice_B) | (1<<slice_C)); // we do this to sync all pwm pins because they are on different slices(we need 3 pins for the half bridge and a slice only serves two pins). If we start the pwm with sequential enables, the signals wont be in phase.
 
             gpio_init(pin_EN);
             gpio_set_dir(pin_EN,GPIO_OUT);
@@ -80,9 +148,108 @@ class foc_driver{
         //function that returns wrap based on frequency; divisor is assumed to be 1; the value has to be possible(max wrap is 65535)
         uint calc_wrap(int freq){
             // 125000000=125MHz = clock freq
-            return (125000000/freq);
+            return (125000000/freq/2); //we halve wrap because we are counting up and down instead of wrapping to 0
         }
 };  
+
+//class for foc algorithm
+class foc_controller{
+    public:
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, uint motor_pole_pairs){
+            this->asoc_driver=associated_driver;
+            this->asoc_encoder=associated_encoder;
+            this->motor_pole_pairs=motor_pole_pairs;
+            el_angle_offset=0;
+            align();
+        }
+        //find offset for electrical angle
+        void align(){
+            float tests=30;
+            float sum_sin=0;
+            float sum_cos=0;
+            asoc_driver->enable();
+            setSVPWM(6.9,0,M_PI); //move motor to 180 deg (pi rad)
+            sleep_ms(1000);
+            for(int i=0;i<tests;i++){
+                float el_ang=get_electrical_angle();
+                sum_sin+=sin(el_ang);
+                sum_cos+=cos(el_ang);
+                sleep_ms(10);
+            }
+            
+            float el_angle_offset_reconstructed=atan2(sum_sin/tests,sum_cos/tests);
+            el_angle_offset=clamp_rad(el_angle_offset_reconstructed);
+            setSVPWM(0,0,0);
+            asoc_driver->disable();
+        }
+        //foc loop
+        void loop(){
+
+        }
+        // i think this might be overmodulated
+        void setSVPWM(float Uq, float Ud, float target_el_angle){ //implemented according to https://www.youtube.com/watch?v=QMSWUMEAejg
+            //el_angle has to be clamped between 0 and 2pi
+            target_el_angle=clamp_rad(target_el_angle);
+            int sector = floor(target_el_angle/_PIover3)+1;
+
+            float dA,dB,dC; //duty cycles for each phase needed for bridge;
+            float T1,T2,T0;
+            T1=_SQRT3*sin(sector*_PIover3-target_el_angle)*(Uq/12.0);
+            T2=_SQRT3*sin(target_el_angle-(sector-1.0)*_PIover3)*(Uq/12.0);
+            T0=1-T1-T2;
+            // translate duty cycles to sectors
+            switch(sector){
+                case 1:
+                    //sector 1
+                    dA=T1+T2+T0/2;
+                    dB=T2+T0/2;
+                    dC=T0/2;
+                    break;
+                case 2:
+                    //sector 2
+                    dA=T1+T0/2;
+                    dB=T1+T2+T0/2;
+                    dC=T0/2;
+                    break;
+                case 3:
+                    //sector 3
+                    dA=T0/2;
+                    dB=T1+T2+T0/2;
+                    dC=T2+T0/2;
+                    break;
+                case 4:
+                    //sector 4
+                    dA=T0/2;
+                    dB=T1+T0/2;
+                    dC=T1+T2+T0/2;
+                    break;
+                case 5:
+                    //sector 5
+                    dA=T2+T0/2;
+                    dB=T0/2;
+                    dC=T1+T2+T0/2;
+                    break;
+                case 6:
+                    //sector 6
+                    dA=T1+T2+T0/2;
+                    dB=T0/2;
+                    dC=T1+T0/2;
+                    break;
+            }
+            asoc_driver->set_pwm_duty(dA,dB,dC);
+        }
+        bridge_driver* asoc_driver;
+        encoder* asoc_encoder;
+    // private:
+        uint motor_pole_pairs;
+        float el_angle_offset;
+        float get_electrical_angle(){
+            return clamp_rad(motor_pole_pairs*-asoc_encoder->get_angle_rad()-el_angle_offset);
+        }
+        float get_target_electrical_angle(){
+            return clamp_rad(motor_pole_pairs*-asoc_encoder->get_angle_rad()-el_angle_offset+M_PI_2);
+        }
+};
 
 // limit switch stuff
 #define DEBOUNCE_DELAY_MS 500
@@ -140,7 +307,6 @@ class stepper_driver{
             c.init(microstepping_mult);
             //this accounts for microstepping
             steps_per_rot=360/angle_per_step;
-            zero_motor();//maybe dont zero in the constructor
         }
         enum direction{
             CW=0,
@@ -312,65 +478,82 @@ class stepper_driver{
 
 };
 
+
+//temporary functions for testing
+void six_step(bridge_driver* driver){
+    int sixstepdelay=10;
+    driver->enable();
+    driver->set_pwm_duty(1,0,0);
+    sleep_ms(sixstepdelay);
+    driver->set_pwm_duty(1,1,0);
+    sleep_ms(sixstepdelay);
+    driver->set_pwm_duty(0,1,0);
+    sleep_ms(sixstepdelay);
+    driver->set_pwm_duty(0,1,1);
+    sleep_ms(sixstepdelay);
+    driver->set_pwm_duty(0,0,1);
+    sleep_ms(sixstepdelay);
+    driver->set_pwm_duty(1,0,1);
+    sleep_ms(sixstepdelay);
+}
+
+
 int main()
 {
     stdio_init_all();
-    // sleep_ms(1000);
-    foc_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
+    
+    // foc objects initialization
+    bridge_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
+    encoder encoder(spi0,_PIN_SCK,_PIN_CS,_PIN_MISO,_PIN_MOSI);
+    foc_controller foc(&drv,&encoder,7);
+
+    //adds limit switch interrupts for steppers
     add_limit_switch(_LIMIT_SWITCH_RIGHT);
     add_limit_switch(_LIMIT_SWITCH_LEFT);
-    sleep_ms(3000);
+    
+    //stepper driver initialization
     stepper_driver stp1(_STEP_PINA,_DIR_PINA,&g_limit_switch_left_triggered,1.8,4);
     stepper_driver stp2(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4);
+    // stp1.zero_motor();
+    // stp2.zero_motor();
     
-    drv.enable();
     // stp1.set_dir(stepper_driver::CW);
     // stp2.set_dir(stepper_driver::CW);
     // stp1.move_mm(50,stepper_driver::CCW);
     // stp2.move(200*4,stepper_driver::CCW);
-    // int sixstepdelay=10;
+    
+    foc.asoc_driver->enable();
     while (true) {
-        char buffer[100];
-        int increment;
-        if(!stp1.moving){
-            //i have to figure out how to find out the number of steps for a full cycle
-            // mayve I keep adding uintil we pass the limit switch and then add a command that goes backwards until it finds the limit switch
-            printf("CURRENT STEPS  %d\n",stp1.absolute_position_steps);
-            fgets(buffer, sizeof(buffer), stdin);
-            if(strcmp(buffer,"back\n")==0){
-                stp1.set_dir(stepper_driver::CW);
-                while(!g_limit_switch_left_triggered){
-                    stp1.step();
-                    sleep_us(5000);
-                    stp1.absolute_position_steps++;
-                }
-                printf("FOUND TOTAL LENGHT: %d\n",stp1.absolute_position_steps);
-            }
-            else{
-                increment=atoi(buffer);
-                printf("MOVING %d steps\n",increment);
-                stepper_driver::direction newdir=increment>0?stepper_driver::CW:stepper_driver::CCW;
-                increment= abs(increment);
-                stp1.move(increment,newdir);
-            }
-        }
-        // //six step commutation test
-        // drv.set_pwm_duty(1,0,0);
-        // sleep_ms(sixstepdelay);
-        // drv.set_pwm_duty(1,1,0);
-        // sleep_ms(sixstepdelay);
-        // drv.set_pwm_duty(0,1,0);
-        // sleep_ms(sixstepdelay);
-        // drv.set_pwm_duty(0,1,1);
-        // sleep_ms(sixstepdelay);
-        // drv.set_pwm_duty(0,0,1);
-        // sleep_ms(sixstepdelay);
-        // drv.set_pwm_duty(1,0,1);
-        // sleep_ms(sixstepdelay);
 
-
-        stp1.loop();
-        stp2.loop();
+        //read command from usb
+        // char buffer[100];
+        // int increment;
+        // if(!stp1.moving){
+        //     //i have to figure out how to find out the number of steps for a full cycle
+        //     // mayve I keep adding uintil we pass the limit switch and then add a command that goes backwards until it finds the limit switch
+        //     printf("CURRENT STEPS  %d\n",stp1.absolute_position_steps);
+            
+        //     fgets(buffer, sizeof(buffer), stdin);
+        //     if(strcmp(buffer,"back\n")==0){
+        //         stp1.set_dir(stepper_driver::CW);
+        //         while(!g_limit_switch_left_triggered){
+        //             stp1.step();
+        //             sleep_us(5000);
+        //             stp1.absolute_position_steps++;
+        //         }
+        //         printf("FOUND TOTAL LENGHT: %d\n",stp1.absolute_position_steps);
+        //     }
+        //     else{
+        //         increment=atoi(buffer);
+        //         printf("MOVING %d steps\n",increment);
+        //         stepper_driver::direction newdir=increment>0?stepper_driver::CW:stepper_driver::CCW;
+        //         increment= abs(increment);
+        //         stp1.move(increment,newdir);
+        //     }
+        // }
+        
+        
+        /// alternate stepper rotations
         // if(!stp1.moving && !stp2.moving){
         //     sleep_ms(1000);
         //     if(i){
@@ -383,12 +566,18 @@ int main()
         //     }
         //     i=!i;
         // }
+
+        //reset limit switches... temp?
         if(g_limit_switch_right_triggered){
             g_limit_switch_right_triggered=false;
         }
         if(g_limit_switch_left_triggered){
             g_limit_switch_left_triggered=false;
         }
+
+        stp1.loop();
+        stp2.loop();
         sleep_us(1);
     }
 }
+            
