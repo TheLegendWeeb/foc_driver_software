@@ -64,7 +64,7 @@ class motor_current{
         float d;
         float q;
         void update_ab_values(){
-            //formulas from https://www.ti.com/lit/an/bpra048/bpra048.pdf
+            //formulas from https://www.ti.com/lit/an/bpra048/bpra048.pdf   ; tested using https://www.mathworks.com/help/mcb/ref/clarketransform.html
             //simplefoc does something about sign too
             // alpha = (2/3.0)*(a-(b-c));
             // beta = 2*_1overSQRT3*(b-c);
