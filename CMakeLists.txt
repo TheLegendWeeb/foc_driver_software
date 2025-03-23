@@ -57,6 +57,7 @@ target_include_directories(driver_test PRIVATE
 target_link_libraries(driver_test 
         hardware_spi
         hardware_pwm
+        hardware_adc
         )
 
 pico_add_extra_outputs(driver_test)

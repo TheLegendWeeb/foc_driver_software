@@ -2,9 +2,17 @@
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
 #include "hardware/pwm.h"
+#include "hardware/adc.h"
 
 #include <cmath>
 #include <cstring>
+
+//current sense pins
+#define _CURRENT_SENSE_PIN_A 26
+#define _CURRENT_SENSE_PIN_B 27
+#define _CURRENT_SENSE_CHANNEL_A 0
+#define _CURRENT_SENSE_CHANNEL_B 1
+//motor two phase resistance:16.6
 
 // SPI Defines
 #define _PIN_MISO 16
@@ -29,9 +37,10 @@
 #define _LIMIT_SWITCH_LEFT 5
 
 //Util values defs
-#define _2PI     6.2831853072
-#define _PIover3 1.0471975512
-#define _SQRT3   1.7320508075
+#define _2PI        6.2831853072
+#define _PIover3    1.0471975512
+#define _SQRT3      1.7320508075
+#define _1overSQRT3 0.5773502691
 
 //useful functions
 
@@ -43,13 +52,94 @@ float clamp_rad(float angle_rad){
     return angle_rad;
 }
 
+//class for currents (contains each phase and stuff)
+// how do i make this efficient. Maybe an update function? That could open opportunities for errors
+class motor_current{
+    public:
+        float a;
+        float b;
+        float c;
+        float alpha;
+        float beta;
+        float d;
+        float q;
+        void update_ab_values(){
+            //formulas from https://www.ti.com/lit/an/bpra048/bpra048.pdf
+            //simplefoc does something about sign too
+            // alpha = (2/3.0)*(a-(b-c));
+            // beta = 2*_1overSQRT3*(b-c);
+            alpha = (2 / 3.0) * (a - 0.5 * b - 0.5 * c);
+            beta = (2 / 3.0) * (_SQRT3 * 0.5 * (b - c));
+        }
+        void update_dq_values(float el_angle){
+            update_ab_values();
+            //make this use a lookup table
+            float cos_theta=cos(el_angle);
+            float sin_theta=sin(el_angle);
+            d=alpha*cos_theta+beta*sin_theta;
+            q=beta*cos_theta-alpha*sin_theta;
+        }
+};
+
+//class for the current sensor
+class current_sensor{
+    public:
+        current_sensor(int cs_phase_a_pin, int cs_phase_b_pin){
+            pinA=cs_phase_a_pin;
+            pinB=cs_phase_b_pin;
+            adc_init();
+            adc_gpio_init(pinA);
+            adc_gpio_init(pinB);
+
+            calculate_offset_voltage();
+        }
+        motor_current get_motor_current(){
+            motor_current current;
+            current.a=read_raw_voltage(_CURRENT_SENSE_CHANNEL_A)-center_offset_voltage_a;
+            current.b=read_raw_voltage(_CURRENT_SENSE_CHANNEL_B)-center_offset_voltage_b;
+            current.a*=1000.0;
+            current.b*=1000.0;
+            current.a=current.a/gain;
+            current.b=current.b/gain;
+            current.c=-current.a-current.b;
+            return current;
+        }
+        
+    private:
+        uint pinA;
+        uint pinB;
+        const float VCC_Sensor=3.3;
+        const float BIT_STEP=4096.0;
+        const float gain=122.1;
+        float center_offset_voltage_a=0;
+        float center_offset_voltage_b=0;
+
+        float read_raw_voltage(int channel){
+            adc_select_input(channel);
+            float voltage=adc_read();
+            return (voltage/BIT_STEP)*VCC_Sensor;
+        }
+        void calculate_offset_voltage(){
+            center_offset_voltage_a=0;
+            center_offset_voltage_b=0;
+            for(int i=0;i<1000;i++){
+                center_offset_voltage_a+=read_raw_voltage(_CURRENT_SENSE_CHANNEL_A);
+                sleep_us(1);
+                center_offset_voltage_b+=read_raw_voltage(_CURRENT_SENSE_CHANNEL_B);
+                sleep_us(1);
+            }
+            center_offset_voltage_a/=1000.0;
+            center_offset_voltage_b/=1000.0;
+        }
+};
+
 // spi encoder class
 class encoder{
     // TODO: Add possibility to send offset to sensor
     // Add functions for continuous angles
     public:
         // class constructor
-        encoder(spi_inst_t *spi_channel,uint sck_pin,uint cs_pin, uint miso_pin, uint mosi_pin){
+        encoder(spi_inst_t *spi_channel,uint sck_pin,uint cs_pin, uint miso_pin, uint mosi_pin, bool reverse=false){
             spi_init(spi_channel,1000*1000); // spi @ 1MHZ
             spi_set_format(spi_channel,16,SPI_CPOL_0,SPI_CPHA_1,SPI_MSB_FIRST); //mode 1 spi, 16 bit
             gpio_set_function(miso_pin, GPIO_FUNC_SPI);
@@ -61,6 +151,7 @@ class encoder{
             gpio_init(cs_pin);
             gpio_set_dir(cs_pin, GPIO_OUT);
             gpio_put(cs_pin, 1);
+            this->reverse=reverse;
         }
         // returns angle in int form
         uint16_t get_angle(){ //first read sends the read command and the second has the data
@@ -73,6 +164,8 @@ class encoder{
             spi_write16_read16_blocking(spi_channel,&ANGLE_READ_COMMAND,&angle_int,1);
             gpio_put(cs_pin,1);
             angle_int=angle_int & 0b0011111111111111;
+            if(reverse)
+                angle_int=16383-angle_int;
             return angle_int;
         }
         // returns angle in DEG
@@ -87,6 +180,7 @@ class encoder{
         uint cs_pin;
         spi_inst_t* spi_channel;
         const uint16_t ANGLE_READ_COMMAND=0xFFFF;
+        bool reverse;
 };
 
 // class for the 1/2 bridge drv8318 driver
@@ -155,9 +249,11 @@ class bridge_driver{
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, uint motor_pole_pairs){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
+            this->asoc_cs=associated_current_sensor;
+
             this->motor_pole_pairs=motor_pole_pairs;
             el_angle_offset=0;
             align();
@@ -184,7 +280,11 @@ class foc_controller{
         }
         //foc loop
         void loop(){
-
+            //temp
+            setSVPWM(6.8,0,get_target_electrical_angle(direction::CCW));
+            motor_current meas_current=asoc_cs->get_motor_current();
+            meas_current.update_dq_values(get_electrical_angle());
+            // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
         }
         // i think this might be overmodulated
         void setSVPWM(float Uq, float Ud, float target_el_angle){ //implemented according to https://www.youtube.com/watch?v=QMSWUMEAejg
@@ -238,16 +338,26 @@ class foc_controller{
             }
             asoc_driver->set_pwm_duty(dA,dB,dC);
         }
+        enum direction{
+            CW=0,
+            CCW=1
+        };
         bridge_driver* asoc_driver;
         encoder* asoc_encoder;
+        current_sensor* asoc_cs;
     // private:
         uint motor_pole_pairs;
         float el_angle_offset;
         float get_electrical_angle(){
-            return clamp_rad(motor_pole_pairs*-asoc_encoder->get_angle_rad()-el_angle_offset);
+            return clamp_rad(motor_pole_pairs*asoc_encoder->get_angle_rad()-el_angle_offset);
         }
-        float get_target_electrical_angle(){
-            return clamp_rad(motor_pole_pairs*-asoc_encoder->get_angle_rad()-el_angle_offset+M_PI_2);
+        float get_target_electrical_angle(direction dir){
+            float angle=get_electrical_angle();
+            if(dir==direction::CW)
+                angle=clamp_rad(angle-M_PI_2);
+            else
+                angle=clamp_rad(angle+M_PI_2);
+            return angle;
         }
 };
 
@@ -504,8 +614,9 @@ int main()
     
     // foc objects initialization
     bridge_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
-    encoder encoder(spi0,_PIN_SCK,_PIN_CS,_PIN_MISO,_PIN_MOSI);
-    foc_controller foc(&drv,&encoder,7);
+    encoder encoder(spi0,_PIN_SCK,_PIN_CS,_PIN_MISO,_PIN_MOSI,true);
+    current_sensor cs(_CURRENT_SENSE_PIN_A,_CURRENT_SENSE_PIN_B);
+    foc_controller foc(&drv,&encoder, &cs,7);
 
     //adds limit switch interrupts for steppers
     add_limit_switch(_LIMIT_SWITCH_RIGHT);
@@ -523,7 +634,23 @@ int main()
     // stp2.move(200*4,stepper_driver::CCW);
     
     foc.asoc_driver->enable();
+
+    motor_current test_c;
     while (true) {
+        foc.loop();
+
+        //test current transforms
+        // for(float test_theta=0;test_theta<_2PI;test_theta+=0.05){
+        //     test_c.a=sin(test_theta);
+        //     test_c.b=sin(test_theta+(2*M_PI)/3.0);
+        //     test_c.c=sin(test_theta+(4*M_PI)/3.0);
+        //     // test_c.a=1.0;
+        //     // test_c.b=2.0;
+        //     // test_c.c=3.0;
+        //     test_c.update_dq_values(test_theta);
+        //     printf("%f %f %f %f %f %f %f      %f\n",test_c.a,test_c.b,test_c.c,test_c.alpha,test_c.beta,test_c.d,test_c.q,test_theta);
+        //     sleep_ms(50);
+        // }
 
         //read command from usb
         // char buffer[100];
@@ -532,7 +659,7 @@ int main()
         //     //i have to figure out how to find out the number of steps for a full cycle
         //     // mayve I keep adding uintil we pass the limit switch and then add a command that goes backwards until it finds the limit switch
         //     printf("CURRENT STEPS  %d\n",stp1.absolute_position_steps);
-            
+        //    
         //     fgets(buffer, sizeof(buffer), stdin);
         //     if(strcmp(buffer,"back\n")==0){
         //         stp1.set_dir(stepper_driver::CW);
