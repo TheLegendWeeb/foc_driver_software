@@ -335,7 +335,7 @@ class foc_controller{
         //foc loop
         void loop(){
             //temporary
-            //velocity controller
+            //velocity controller   (a little cogging at low speeds, prob should fix)
             float velocity_meas=asoc_encoder->get_velocity();   //~50us
             //pid
             float vel_error=velocity_target-velocity_meas;
