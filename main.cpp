@@ -195,7 +195,7 @@ class encoder{
             return (float)get_angle()/16384.0*_2PI;
         }
         //returns the FILTERED VELOCITY in rad/s
-        float get_velocity(){
+        float get_velocity(){  ///velocity timer might overflow. test/solve
             uint64_t current_time=time_us_64();
             float delta_time=current_time-old_time; //us
             delta_time/=1000000.0; //s
@@ -344,21 +344,29 @@ class foc_controller{
             float derivative_error=vel_error-prev_error;
             float uq=kp*vel_error+ki*integral_error+Kd * derivative_error;
             prev_error = vel_error;
-            
+        
             //change direction based on target sign and reference sign (needed for complete loop)
             direction regdir;
-            if(velocity_target>0)
-            regdir=direction::CW;
-            else
-            regdir=direction::CCW;
-            if(uq<0){
-                if(regdir == direction::CW)
-                    regdir=direction::CCW;
-                else
-                    regdir=direction::CW;
-                uq=fabs(uq);
+            if(velocity_target>0){
+                regdir=direction::CW;
+                if(uq<0){
+                    if(regdir == direction::CW)
+                        regdir=direction::CCW;
+                    else
+                        regdir=direction::CW;
+                }
             }
-            
+            else{
+                regdir=direction::CCW;
+                if(uq>0){
+                    if(regdir == direction::CW)
+                        regdir=direction::CCW;
+                    else
+                        regdir=direction::CW;
+                }
+            }
+                
+            uq=fabs(uq);
             //avoid over-modulation
             if(uq>max_reference){
                 uq=max_reference;
@@ -740,10 +748,14 @@ int main()
     foc.asoc_driver->enable();
 
     motor_current test_c;
+    uint32_t tim=time_us_32()+2000*1000;
+    foc.velocity_target=4*M_PI;
     while (true) {
         foc.loop();
-        foc.velocity_target=2;
-
+        if(tim<time_us_32()){
+            foc.velocity_target*=-1;
+            tim=time_us_32()+2000*1000;
+        }
         //test current transforms
         // for(float test_theta=0;test_theta<_2PI;test_theta+=0.05){
         //     test_c.a=sin(test_theta);
