@@ -44,6 +44,7 @@
 
 //useful functions
 
+
 //this clamps an angle to the 0 to 2PI range
 float clamp_rad(float angle_rad){
     angle_rad=fmod(angle_rad,_2PI);
@@ -68,8 +69,8 @@ class motor_current{
             //simplefoc does something about sign too
             // alpha = (2/3.0)*(a-(b-c));
             // beta = 2*_1overSQRT3*(b-c);
-            alpha = (2 / 3.0) * (a - 0.5 * b - 0.5 * c);
-            beta = (2 / 3.0) * (_SQRT3 * 0.5 * (b - c));
+            alpha = 0.666666666 * (a - 0.5 * (b-c));
+            beta = 0.666666666 * (_SQRT3 * 0.5 * (b - c));
         }
         void update_dq_values(float el_angle){
             update_ab_values();
@@ -246,6 +247,7 @@ class bridge_driver{
         }
 };  
 
+
 //class for foc algorithm
 class foc_controller{
     public:
@@ -281,19 +283,23 @@ class foc_controller{
         //foc loop
         void loop(){
             //temp
-            setSVPWM(6.8,0,get_target_electrical_angle(direction::CCW));
-            motor_current meas_current=asoc_cs->get_motor_current();
-            meas_current.update_dq_values(get_electrical_angle());
-            // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
+            setSVPWM(6.8,0,get_target_electrical_angle(direction::CCW)); // ~100us w/o lookup table
+            
+            motor_current meas_current=asoc_cs->get_motor_current(); //~7us
+            
+            meas_current.update_dq_values(get_electrical_angle()); //~50 us w/o lookup table
+            printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
         }
         // i think this might be overmodulated
         void setSVPWM(float Uq, float Ud, float target_el_angle){ //implemented according to https://www.youtube.com/watch?v=QMSWUMEAejg
+            // ~100us
             //el_angle has to be clamped between 0 and 2pi
             target_el_angle=clamp_rad(target_el_angle);
             int sector = floor(target_el_angle/_PIover3)+1;
 
             float dA,dB,dC; //duty cycles for each phase needed for bridge;
             float T1,T2,T0;
+            //lookup
             T1=_SQRT3*sin(sector*_PIover3-target_el_angle)*(Uq/12.0);
             T2=_SQRT3*sin(target_el_angle-(sector-1.0)*_PIover3)*(Uq/12.0);
             T0=1-T1-T2;
@@ -606,6 +612,7 @@ void six_step(bridge_driver* driver){
     driver->set_pwm_duty(1,0,1);
     sleep_ms(sixstepdelay);
 }
+
 
 
 int main()
