@@ -292,10 +292,11 @@ class bridge_driver{
         }
 };  
 
+
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance, float current_limit){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensor;
@@ -333,15 +334,48 @@ class foc_controller{
         }
         //foc loop
         void loop(){
-            //temp
-            setSVPWM(max_reference,0,get_target_electrical_angle(direction::CCW)); // ~100us w/o lookup table   ~80-120us with lookup
+            //temporary
+            //velocity controller
+            float velocity_meas=asoc_encoder->get_velocity();   //~50us
+            //pid
+            float vel_error=velocity_target-velocity_meas;
+            if(fabs(velocity_target)>0.001)
+                integral_error += vel_error;
+            float derivative_error=vel_error-prev_error;
+            float uq=kp*vel_error+ki*integral_error+Kd * derivative_error;
+            prev_error = vel_error;
+            
+            //change direction based on target sign and reference sign (needed for complete loop)
+            direction regdir;
+            if(velocity_target>0)
+            regdir=direction::CW;
+            else
+            regdir=direction::CCW;
+            if(uq<0){
+                if(regdir == direction::CW)
+                    regdir=direction::CCW;
+                else
+                    regdir=direction::CW;
+                uq=fabs(uq);
+            }
+            
+            //avoid over-modulation
+            if(uq>max_reference){
+                uq=max_reference;
+                integral_error-=vel_error;
+            }
+
+            //send pwm to motor
+            setSVPWM(uq,0,get_target_electrical_angle(regdir)); // ~100us w/o lookup table   ~80-120us with lookup
             
             motor_current meas_current=asoc_cs->get_motor_current(); //~7us
-            float a=asoc_encoder->get_velocity();   //~50us
             meas_current.update_dq_values(get_electrical_angle()); //~50 us w/o lookup table
+            
             // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
         }
-        // i think this might be overmodulated
+        float velocity_target;
+
+        // sets the pwm from a uq reference
         void setSVPWM(float Uq, float Ud, float target_el_angle){ //implemented according to https://www.youtube.com/watch?v=QMSWUMEAejg
             // ~100us
             //el_angle has to be clamped between 0 and 2pi
@@ -421,6 +455,13 @@ class foc_controller{
             return angle;
         }
         float max_reference;
+
+        //velocity PID
+        float kp=0.1;
+        float ki=0.01;   //default values
+        float Kd = 0.005; 
+        float integral_error=0;
+        float prev_error = 0;
 };
 
 // limit switch stuff
@@ -701,6 +742,7 @@ int main()
     motor_current test_c;
     while (true) {
         foc.loop();
+        foc.velocity_target=2;
 
         //test current transforms
         // for(float test_theta=0;test_theta<_2PI;test_theta+=0.05){
