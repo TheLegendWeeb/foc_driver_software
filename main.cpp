@@ -177,11 +177,40 @@ class encoder{
         float get_angle_rad(){
             return (float)get_angle()/16384.0*_2PI;
         }
-    private:
+        //returns the FILTERED VELOCITY in rad/s
+        float get_velocity(){
+            uint64_t current_time=time_us_64();
+            float delta_time=current_time-old_time; //us
+            delta_time/=1000000; //s
+
+            float current_angle=get_angle_rad(); //rad
+            float delta_angle=current_angle-old_angle;
+
+            //angle weapping
+            if (delta_angle > M_PI) { // Wrapped from 0 to 2PI
+                delta_angle -= _2PI;
+            } else if (delta_angle < -M_PI) { // Wrapped from 2PI to 0
+                delta_angle += _2PI;
+            }
+
+            old_angle=current_angle;
+            old_time=current_time;
+
+            float raw_velocity=delta_angle/delta_time; //rad/s
+            smoothed_velocity = ALPHA * raw_velocity + (1 - ALPHA) * smoothed_velocity; //LP FILTER
+
+            return smoothed_velocity;
+        }
+        private:
         uint cs_pin;
         spi_inst_t* spi_channel;
         const uint16_t ANGLE_READ_COMMAND=0xFFFF;
         bool reverse;
+        //velocity func
+        float old_angle=0;
+        uint64_t old_time=0;
+        float smoothed_velocity=0;
+        float ALPHA=0.05; //5% weight seems fine
 };
 
 // class for the 1/2 bridge drv8318 driver
@@ -286,9 +315,10 @@ class foc_controller{
             setSVPWM(6.8,0,get_target_electrical_angle(direction::CCW)); // ~100us w/o lookup table
             
             motor_current meas_current=asoc_cs->get_motor_current(); //~7us
-            
+            float a=asoc_encoder->get_velocity();
+            printf("%f %d %d\n",asoc_encoder->get_velocity(),-60,60);
             meas_current.update_dq_values(get_electrical_angle()); //~50 us w/o lookup table
-            printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
+            // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
         }
         // i think this might be overmodulated
         void setSVPWM(float Uq, float Ud, float target_el_angle){ //implemented according to https://www.youtube.com/watch?v=QMSWUMEAejg
