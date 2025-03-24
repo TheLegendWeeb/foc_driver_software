@@ -335,7 +335,7 @@ class foc_controller{
         //foc loop
         void loop(){
             //temporary
-            //velocity controller   (a little cogging at low speeds, prob should fix)
+            //velocity controller  ~227us exec (a little cogging at low speeds, prob should fix)
             float velocity_meas=asoc_encoder->get_velocity();   //~50us
             //pid
             float vel_error=velocity_target-velocity_meas;
@@ -751,7 +751,10 @@ int main()
     uint32_t tim=time_us_32()+2000*1000;
     foc.velocity_target=4*M_PI;
     while (true) {
+        uint64_t exectime=time_us_64();
         foc.loop();
+        uint64_t donetime=time_us_64();
+        printf("EXEC %lld\n",donetime-exectime);
         if(tim<time_us_32()){
             foc.velocity_target*=-1;
             tim=time_us_32()+2000*1000;
@@ -821,7 +824,7 @@ int main()
 
         stp1.loop();
         stp2.loop();
-        sleep_us(1);
+        tight_loop_contents();
     }
 }
             
