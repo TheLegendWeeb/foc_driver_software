@@ -181,7 +181,7 @@ class encoder{
         float get_velocity(){
             uint64_t current_time=time_us_64();
             float delta_time=current_time-old_time; //us
-            delta_time/=1000000; //s
+            delta_time/=1000000.0; //s
 
             float current_angle=get_angle_rad(); //rad
             float delta_angle=current_angle-old_angle;
@@ -198,7 +198,6 @@ class encoder{
 
             float raw_velocity=delta_angle/delta_time; //rad/s
             smoothed_velocity = ALPHA * raw_velocity + (1 - ALPHA) * smoothed_velocity; //LP FILTER
-
             return smoothed_velocity;
         }
         private:
@@ -276,7 +275,6 @@ class bridge_driver{
         }
 };  
 
-
 //class for foc algorithm
 class foc_controller{
     public:
@@ -315,8 +313,7 @@ class foc_controller{
             setSVPWM(6.8,0,get_target_electrical_angle(direction::CCW)); // ~100us w/o lookup table
             
             motor_current meas_current=asoc_cs->get_motor_current(); //~7us
-            float a=asoc_encoder->get_velocity();
-            printf("%f %d %d\n",asoc_encoder->get_velocity(),-60,60);
+            float a=asoc_encoder->get_velocity();   //~50us
             meas_current.update_dq_values(get_electrical_angle()); //~50 us w/o lookup table
             // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
         }
