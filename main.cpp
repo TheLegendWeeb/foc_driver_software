@@ -398,7 +398,7 @@ class foc_controller{
 
             motor_current meas_current=asoc_cs->get_motor_current(); //~7us
             meas_current.update_dq_values(get_electrical_angle()); //~50 us w/o lookup table  ~40us with lookup
-            printf("%f %f %f     %f    %f\n",meas_current.a,meas_current.b,meas_current.c,velocity_meas,uq);
+            printf("%f %f %f\n",meas_current.a,meas_current.b,meas_current.c);
             // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
         }
         float velocity_target;
@@ -747,9 +747,9 @@ int main()
     stdio_init_all();
     
     // foc objects initialization
+    current_sensor cs(_CURRENT_SENSE_PIN_A,_CURRENT_SENSE_PIN_B);
     bridge_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
     encoder encoder(spi0,_PIN_SCK,_PIN_CS,_PIN_MISO,_PIN_MOSI,true);
-    current_sensor cs(_CURRENT_SENSE_PIN_A,_CURRENT_SENSE_PIN_B);
     foc_controller foc(&drv,&encoder, &cs,7,24,15);
 
     //adds limit switch interrupts for steppers
