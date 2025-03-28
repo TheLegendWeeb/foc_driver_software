@@ -147,7 +147,7 @@ class current_sensor{
         uint pinB;
         const float VCC_Sensor=3.3;
         const float BIT_STEP=4096.0;
-        const float gain=122.1;
+        const float gain=109;
         float center_offset_voltage_a=0;
         float center_offset_voltage_b=0;
 
