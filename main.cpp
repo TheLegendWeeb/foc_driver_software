@@ -82,7 +82,8 @@ float sin_aprox_clamp(float angle_rad){
 }
 //aproximates cos with a lookup table
 float cos_aprox(float angle_rad){
-    return sin_aprox(angle_rad+M_PI_2);
+    //made this work
+    return sin_aprox(clamp_rad(angle_rad+M_PI_2));
 }
 
 
