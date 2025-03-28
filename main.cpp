@@ -311,6 +311,8 @@ class bridge_driver{
         }
 };  
 
+
+
 //class for foc algorithm
 class foc_controller{
     public:
@@ -395,7 +397,8 @@ class foc_controller{
 
             motor_current meas_current=asoc_cs->get_motor_current(); //~7us
             meas_current.update_dq_values(get_electrical_angle()); //~50 us w/o lookup table  ~40us with lookup
-            printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
+            printf("%f %f %f     %f    %f\n",meas_current.a,meas_current.b,meas_current.c,velocity_meas,uq);
+            // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
         }
         float velocity_target;
 
@@ -769,14 +772,16 @@ int main()
     uint32_t tim=time_us_32()+2000*1000;
     foc.velocity_target=4*M_PI;
     while (true) {
-        uint64_t exectime=time_us_64();
+        //test main loop timing
+        // uint64_t exectime=time_us_64();
         foc.loop();
-        uint64_t donetime=time_us_64();
-        printf("EXEC %lld\n",donetime-exectime);
-        if(tim<time_us_32()){
-           // foc.velocity_target*=-1;
-            tim=time_us_32()+2000*1000;
-        }
+        // uint64_t donetime=time_us_64();
+        // printf("EXEC %lld\n",donetime-exectime);
+        // if(tim<time_us_32()){
+        //    // foc.velocity_target*=-1;
+        //     tim=time_us_32()+2000*1000;
+        // }
+
         //test current transforms
         // for(float test_theta=0;test_theta<_2PI;test_theta+=0.05){
         //     test_c.a=sin(test_theta);
@@ -840,8 +845,8 @@ int main()
             g_limit_switch_left_triggered=false;
         }
 
-        stp1.loop();
-        stp2.loop();
+        // stp1.loop();
+        // stp2.loop();
         tight_loop_contents();
     }
 }
