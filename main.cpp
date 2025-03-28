@@ -157,16 +157,15 @@ class current_sensor{
             return (voltage/BIT_STEP)*VCC_Sensor;
         }
         void calculate_offset_voltage(){
+            sleep_ms(500);
             center_offset_voltage_a=0;
             center_offset_voltage_b=0;
-            for(int i=0;i<1000;i++){
+            for(int i=0;i<10000;i++){
                 center_offset_voltage_a+=read_raw_voltage(_CURRENT_SENSE_CHANNEL_A);
-                sleep_us(1);
                 center_offset_voltage_b+=read_raw_voltage(_CURRENT_SENSE_CHANNEL_B);
-                sleep_us(1);
             }
-            center_offset_voltage_a/=1000.0;
-            center_offset_voltage_b/=1000.0;
+            center_offset_voltage_a/=10000.0;
+            center_offset_voltage_b/=10000.0;
         }
 };
 
@@ -279,6 +278,8 @@ class bridge_driver{
 
             gpio_init(pin_EN);
             gpio_set_dir(pin_EN,GPIO_OUT);
+
+            set_pwm_duty(0,0,0);
             disable();  //default disabled
         }
         //enable the driver idk if it needs delays
