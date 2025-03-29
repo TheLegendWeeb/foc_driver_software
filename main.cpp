@@ -312,12 +312,11 @@ class bridge_driver{
 };  
 
 //PID Controller
-class PIDController{
+class PIController{
     public:
-        PIDController(float kp,float ki,float kd){
+        PIController(float kp,float ki){
             this->kp=kp;
             this->ki=ki;
-            this->kd=kd;
             this->integral_error=0;
             this->prev_error=0;
             previous_time=time_us_64();
@@ -326,13 +325,11 @@ class PIDController{
             uint64_t current_time=time_us_64();
             float delta_time=(current_time-previous_time)/1000000.0;
             float proportional_comp=kp*error;
-            float integral_comp=integral_error+ki*delta_time*0.5(error+prev_error);  //magic from simplefoc
+            float integral_comp=integral_error+ki*delta_time*0.5*(error+prev_error);  //magic from simplefoc
             //antiwindup
             //here; i have to find limits
-            float derivative_comp=kd*(error-prev_error)/delta_time;
 
-            float output=proportional_comp + integral_comp + derivative_comp;
-
+            float output=proportional_comp + integral_comp;
             integral_error=integral_comp;
             prev_error=error;
             previous_time=current_time;
@@ -345,12 +342,12 @@ class PIDController{
         float integral_error;
         float prev_error;
         uint64_t previous_time;
-}
+};
 
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):vel_controller(0.5,10){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensor;
@@ -391,14 +388,9 @@ class foc_controller{
             //velocity controller conf ~200us exec (a little cogging at low speeds, prob should fix)
 
             float velocity_meas=asoc_encoder->get_velocity();   //~50us
-            //pid
             float vel_error=velocity_target-velocity_meas;
-            if(fabs(velocity_target)>0.001)
-                integral_error += vel_error;
-            float derivative_error=vel_error-prev_error;
-            float uq=kp*vel_error+ki*integral_error+Kd * derivative_error;
-            prev_error = vel_error;
-        
+            float uq=vel_controller.compute(vel_error);
+            printf("%f\n",velocity_meas);
             //change direction based on target sign and reference sign (needed for complete loop)
             direction regdir;
             if(velocity_target>0){
@@ -424,7 +416,6 @@ class foc_controller{
             //avoid over-modulation
             if(uq>max_reference){
                 uq=max_reference;
-                integral_error-=vel_error;
             }
 
             //send pwm to motor
@@ -520,11 +511,7 @@ class foc_controller{
         float max_reference;
 
         //velocity PID
-        float kp=0.1;
-        float ki=0.01;   //default values
-        float Kd = 0.005; 
-        float integral_error=0;
-        float prev_error = 0;
+        PIController vel_controller;
 };
 
 // limit switch stuff
