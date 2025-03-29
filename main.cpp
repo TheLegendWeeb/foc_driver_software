@@ -311,7 +311,41 @@ class bridge_driver{
         }
 };  
 
+//PID Controller
+class PIDController{
+    public:
+        PIDController(float kp,float ki,float kd){
+            this->kp=kp;
+            this->ki=ki;
+            this->kd=kd;
+            this->integral_error=0;
+            this->prev_error=0;
+            previous_time=time_us_64();
+        }
+        float compute(float error){
+            uint64_t current_time=time_us_64();
+            float delta_time=(current_time-previous_time)/1000000.0;
+            float proportional_comp=kp*error;
+            float integral_comp=integral_error+ki*delta_time*0.5(error+prev_error);  //magic from simplefoc
+            //antiwindup
+            //here; i have to find limits
+            float derivative_comp=kd*(error-prev_error)/delta_time;
 
+            float output=proportional_comp + integral_comp + derivative_comp;
+
+            integral_error=integral_comp;
+            prev_error=error;
+            previous_time=current_time;
+            return output;
+        }
+    private:
+        float kp;
+        float ki;
+        float kd;
+        float integral_error;
+        float prev_error;
+        uint64_t previous_time;
+}
 
 //class for foc algorithm
 class foc_controller{
