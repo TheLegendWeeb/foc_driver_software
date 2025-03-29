@@ -187,6 +187,7 @@ class encoder{
             gpio_set_dir(cs_pin, GPIO_OUT);
             gpio_put(cs_pin, 1);
             this->reverse=reverse;
+            zero_sensor();
         }
         // returns angle in int form
         uint16_t get_angle(){ //first read sends the read command and the second has the data
@@ -199,9 +200,24 @@ class encoder{
             spi_write16_read16_blocking(spi_channel,&ANGLE_READ_COMMAND,&angle_int,1);
             gpio_put(cs_pin,1);
             angle_int=angle_int & 0b0011111111111111;
-            if(reverse)
+            if(reverse)     //this is needed in case the encoder direction is not the same as the phase succession
                 angle_int=16383-angle_int;
+            
+            int32_t delta_angle=angle_int-previous_angle_int;
+            if(delta_angle>8192){
+                //wrapped negatively
+                done_rotations--;
+            }
+            else if(delta_angle<-8192){
+                //wrapped positively
+                done_rotations++;
+            }
+            previous_angle_int=angle_int;
             return angle_int;
+        }
+        void zero_sensor(){
+            zero_offset=get_angle();
+            done_rotations=0;
         }
         // returns angle in DEG
         float get_angle_deg(){
@@ -234,16 +250,36 @@ class encoder{
             smoothed_velocity = ALPHA * raw_velocity + (1 - ALPHA) * smoothed_velocity; //LP FILTER
             return smoothed_velocity;
         }
+        
+        //returns absolute angle as an int
+        float get_absolute_angle(){
+            return (done_rotations*16384)+get_angle()-zero_offset;
+        }
+        //returns absolute angle as degrees
+        float get_absolute_angle_deg(){
+            return (float)get_absolute_angle()/16384.0*360.0;
+        }
+        //returns absolute angle as radians
+        float get_absolute_angle_rad(){
+            return (float)get_absolute_angle()/16384.0*_2PI;
+        }
+        
         private:
-        uint cs_pin;
-        spi_inst_t* spi_channel;
-        const uint16_t ANGLE_READ_COMMAND=0xFFFF;
-        bool reverse;
-        //velocity func
-        float old_angle=0;
-        uint64_t old_time=0;
-        float smoothed_velocity=0;
-        float ALPHA=0.05; //5% weight seems fine
+            uint cs_pin;
+            spi_inst_t* spi_channel;
+            const uint16_t ANGLE_READ_COMMAND=0xFFFF;
+            
+            //variables to track absoulte angle
+            uint16_t previous_angle_int=0;
+            int done_rotations;
+            bool reverse;
+            uint16_t zero_offset;
+
+            //variables for velocity funcion
+            float old_angle=0;
+            uint64_t old_time=0;
+            float smoothed_velocity=0;
+            float ALPHA=0.05; //5% weight seems fine
 };
 
 // class for the 1/2 bridge drv8318 driver
@@ -349,6 +385,7 @@ class foc_controller{
             
             float el_angle_offset_reconstructed=atan2(sum_sin/tests,sum_cos/tests);
             el_angle_offset=clamp_rad(el_angle_offset_reconstructed);
+            asoc_encoder->zero_sensor();
             setSVPWM(0,0,0);
             asoc_driver->disable();
         }
@@ -760,6 +797,7 @@ void foc_second_core(){
     foc.velocity_target=4*M_PI;
     
     while(true){
+        printf("ANGLE:%f\n",encoder.get_absolute_angle_deg());
         if(!queue_is_empty(&comm_queue_01)){
             queue_remove_blocking(&comm_queue_01,&foc.velocity_target);
             printf("SET %f\n",foc.velocity_target);
