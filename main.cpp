@@ -135,10 +135,8 @@ class current_sensor{
             motor_current current;
             current.a=read_raw_voltage(_CURRENT_SENSE_CHANNEL_A)-center_offset_voltage_a;
             current.b=read_raw_voltage(_CURRENT_SENSE_CHANNEL_B)-center_offset_voltage_b;
-            current.a*=1000.0;
-            current.b*=1000.0;
-            current.a=current.a/gain;
-            current.b=current.b/gain;
+            current.a/=gain;
+            current.b/=gain;
             current.c=-current.a-current.b;
             return current;
         }
@@ -146,9 +144,9 @@ class current_sensor{
     private:
         uint pinA;
         uint pinB;
-        const float VCC_Sensor=3.3;
+        const float VCC_Sensor=5;
         const float BIT_STEP=4096.0;
-        const float gain=125;
+        const float gain=0.185;
         float center_offset_voltage_a=0;
         float center_offset_voltage_b=0;
 
