@@ -4,6 +4,7 @@
 #include "hardware/pwm.h"
 #include "hardware/adc.h"
 #include "pico/multicore.h"
+#include "pico/util/queue.h"
 
 #include <cmath>
 #include <cstring>
@@ -43,15 +44,6 @@
 #define _SQRT3      1.7320508075
 #define _1overSQRT3 0.5773502691
 
-//useful functions
-void send_float(float value) {
-    multicore_fifo_push_blocking(*reinterpret_cast<uint32_t*>(&value));
-}
-
-float receive_float() {
-    uint32_t int_representation = multicore_fifo_pop_blocking();
-    return *reinterpret_cast<float*>(&int_representation);
-}
 
 //this clamps an angle to the 0 to 2PI range
 float clamp_rad(float angle_rad){
@@ -363,11 +355,6 @@ class foc_controller{
         //foc loop
         void loop(){  //temporary
             //velocity controller conf ~200us exec (a little cogging at low speeds, prob should fix)
-            if(multicore_fifo_rvalid()){
-                velocity_target=receive_float();
-                printf("SET %f\n",velocity_target);
-            }
-
 
             float velocity_meas=asoc_encoder->get_velocity();   //~50us
             //pid
@@ -411,7 +398,7 @@ class foc_controller{
 
             motor_current meas_current=asoc_cs->get_motor_current(); //~7us
             meas_current.update_dq_values(get_electrical_angle()); //~50 us w/o lookup table  ~40us with lookup
-            printf("%f\n",velocity_meas);
+            // printf("%f\n",velocity_meas);
             // printf("%f %f %f\n",meas_current.a,meas_current.b,meas_current.c);
             // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
         }
@@ -755,6 +742,11 @@ void six_step(bridge_driver* driver){
 }
 
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+queue_t comm_queue_01; //queue for communication from core 0 to core 1
+queue_t comm_queue_10;
+
 void foc_second_core(){
     stdio_init_all();
 
@@ -768,6 +760,10 @@ void foc_second_core(){
     foc.velocity_target=4*M_PI;
     
     while(true){
+        if(!queue_is_empty(&comm_queue_01)){
+            queue_remove_blocking(&comm_queue_01,&foc.velocity_target);
+            printf("SET %f\n",foc.velocity_target);
+        }
         foc.loop();
         tight_loop_contents();
     }
@@ -776,6 +772,7 @@ void foc_second_core(){
 int main()
 {
     stdio_init_all();
+    queue_init(&comm_queue_01,sizeof(float),1);
     multicore_launch_core1(foc_second_core);
 
     //adds limit switch interrupts for steppers
@@ -801,7 +798,7 @@ int main()
             // Convert the string to a float.
             float value = strtof(command, NULL);
             printf("NEW VELOCITY: %f\n", value);
-            send_float(value);
+            queue_add_blocking(&comm_queue_01,&value);
 
         } else {
             printf("Error reading input.\n");
