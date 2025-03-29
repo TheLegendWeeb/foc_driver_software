@@ -3,6 +3,7 @@
 #include "hardware/spi.h"
 #include "hardware/pwm.h"
 #include "hardware/adc.h"
+#include "pico/multicore.h"
 
 #include <cmath>
 #include <cstring>
@@ -43,7 +44,14 @@
 #define _1overSQRT3 0.5773502691
 
 //useful functions
+void send_float(float value) {
+    multicore_fifo_push_blocking(*reinterpret_cast<uint32_t*>(&value));
+}
 
+float receive_float() {
+    uint32_t int_representation = multicore_fifo_pop_blocking();
+    return *reinterpret_cast<float*>(&int_representation);
+}
 
 //this clamps an angle to the 0 to 2PI range
 float clamp_rad(float angle_rad){
@@ -355,6 +363,12 @@ class foc_controller{
         //foc loop
         void loop(){  //temporary
             //velocity controller conf ~200us exec (a little cogging at low speeds, prob should fix)
+            if(multicore_fifo_rvalid()){
+                velocity_target=receive_float();
+                printf("SET %f\n",velocity_target);
+            }
+
+
             float velocity_meas=asoc_encoder->get_velocity();   //~50us
             //pid
             float vel_error=velocity_target-velocity_meas;
@@ -397,7 +411,8 @@ class foc_controller{
 
             motor_current meas_current=asoc_cs->get_motor_current(); //~7us
             meas_current.update_dq_values(get_electrical_angle()); //~50 us w/o lookup table  ~40us with lookup
-            printf("%f %f %f\n",meas_current.a,meas_current.b,meas_current.c);
+            printf("%f\n",velocity_meas);
+            // printf("%f %f %f\n",meas_current.a,meas_current.b,meas_current.c);
             // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
         }
         float velocity_target;
@@ -740,20 +755,32 @@ void six_step(bridge_driver* driver){
 }
 
 
-
-int main()
-{
+void foc_second_core(){
     stdio_init_all();
-    
+
     // foc objects initialization
     current_sensor cs(_CURRENT_SENSE_PIN_A,_CURRENT_SENSE_PIN_B);
     bridge_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
     encoder encoder(spi0,_PIN_SCK,_PIN_CS,_PIN_MISO,_PIN_MOSI,true);
     foc_controller foc(&drv,&encoder, &cs,7,24,15);
 
+    foc.asoc_driver->enable();
+    foc.velocity_target=4*M_PI;
+    
+    while(true){
+        foc.loop();
+        tight_loop_contents();
+    }
+}
+
+int main()
+{
+    stdio_init_all();
+    multicore_launch_core1(foc_second_core);
+
     //adds limit switch interrupts for steppers
-    add_limit_switch(_LIMIT_SWITCH_RIGHT);
-    add_limit_switch(_LIMIT_SWITCH_LEFT);
+    // add_limit_switch(_LIMIT_SWITCH_RIGHT);
+    // add_limit_switch(_LIMIT_SWITCH_LEFT);
     
     //stepper driver initialization
     stepper_driver stp1(_STEP_PINA,_DIR_PINA,&g_limit_switch_left_triggered,1.8,4);
@@ -765,16 +792,22 @@ int main()
     // stp2.set_dir(stepper_driver::CW);
     // stp1.move_mm(50,stepper_driver::CCW);
     // stp2.move(200*4,stepper_driver::CCW);
-    
-    foc.asoc_driver->enable();
 
-    motor_current test_c;
-    uint32_t tim=time_us_32()+2000*1000;
-    foc.velocity_target=4*M_PI;
+    #define BUFFER_SIZE 32
     while (true) {
+
+        char command[32];
+        if (fgets(command, 32, stdin) != NULL) {
+            // Convert the string to a float.
+            float value = strtof(command, NULL);
+            printf("NEW VELOCITY: %f\n", value);
+            send_float(value);
+
+        } else {
+            printf("Error reading input.\n");
+        }
         //test main loop timing
         // uint64_t exectime=time_us_64();
-        foc.loop();
         // uint64_t donetime=time_us_64();
         // printf("EXEC %lld\n",donetime-exectime);
         // if(tim<time_us_32()){
@@ -838,12 +871,12 @@ int main()
         // }
 
         //reset limit switches... temp?
-        if(g_limit_switch_right_triggered){
-            g_limit_switch_right_triggered=false;
-        }
-        if(g_limit_switch_left_triggered){
-            g_limit_switch_left_triggered=false;
-        }
+        // if(g_limit_switch_right_triggered){
+        //     g_limit_switch_right_triggered=false;
+        // }
+        // if(g_limit_switch_left_triggered){
+        //     g_limit_switch_left_triggered=false;
+        // }
 
         // stp1.loop();
         // stp2.loop();
