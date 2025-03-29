@@ -170,8 +170,6 @@ class current_sensor{
 
 // spi encoder class
 class encoder{
-    // TODO: Add possibility to send offset to sensor
-    // Add functions for continuous angles
     public:
         // class constructor
         encoder(spi_inst_t *spi_channel,uint sck_pin,uint cs_pin, uint miso_pin, uint mosi_pin, bool reverse=false){
@@ -215,6 +213,7 @@ class encoder{
             previous_angle_int=angle_int;
             return angle_int;
         }
+        //makes the current angle be the 0 absolute angle
         void zero_sensor(){
             zero_offset=get_angle();
             done_rotations=0;
