@@ -360,20 +360,19 @@ class PIController{
             uint64_t current_time=time_us_64();
             float delta_time=(current_time-previous_time)/1000000.0;
             float proportional_comp=kp*error;
-            float integral_comp=integral_error+ki*delta_time*0.5*(error+prev_error);  //magic from simplefoc
+            float integral_comp=integral_error+ki*delta_time*0.5*(error+prev_error);  //magic from simplefoc  ;; Trapezoidal integration?
             //antiwindup
             if(integral_comp<-24)
                 integral_comp=-24;
             else if(integral_comp>24)
                 integral_comp=24;
-
             float output=proportional_comp + integral_comp;
             integral_error=integral_comp;
             prev_error=error;
             previous_time=current_time;
             return output;
         }
-    private:
+    //private:
         float kp;
         float ki;
         float integral_error;
@@ -384,7 +383,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public://default pid : 0.5,10
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):vel_controller(0.3,20),angle_controller(3,20){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):vel_controller(0.3,20),angle_controller(15,40){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensor;
@@ -396,8 +395,11 @@ class foc_controller{
             //hard current limiting. This is only used w/o current sense
 
             this->motor_phase_resistance=phase_resistance;
-
+            old_angle_target=0;
+            angle_target=0;
             el_angle_offset=0;
+            old_update_time=0;
+            angle_ramp=6;
             align();
         }
         //find offset for electrical angle
@@ -423,8 +425,13 @@ class foc_controller{
         }
         //foc loop
         void loop(){  //temporary
+            uint64_t current_time=time_us_64();
+            float delta_time=(current_time-old_update_time)/1000000.0;
+
+            //angle controller
             float angle_meas=asoc_encoder->get_absolute_angle_rad();
-            float angle_error=angle_target-angle_meas;
+            old_angle_target=rampTargetAngle(old_angle_target,angle_target,angle_ramp,delta_time);
+            float angle_error=old_angle_target-angle_meas;
             velocity_target=angle_controller.compute(angle_error);
             //velocity controller conf ~200us exec (a little cogging at low speeds, prob should fix)
 
@@ -464,12 +471,23 @@ class foc_controller{
             motor_current meas_current=asoc_cs->get_motor_current(); //~7us
             meas_current.update_dq_values(get_electrical_angle()); //~50 us w/o lookup table  ~40us with lookup
             
-            printf("%f   %f\n",angle_meas,uq);
+
+            old_update_time=current_time;
+            // printf("%f   %f\n",angle_meas,uq);
             // printf("%f %f %f\n",meas_current.a,meas_current.b,meas_current.c);
             // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
         }
         float velocity_target;
         float angle_target;
+        float old_angle_target;
+        float old_update_time; //for calculating dt;
+        float angle_ramp;  //in rad/sec
+
+        void set_angle(float angle){
+            angle_target=angle;
+        }
+
+
 
         // sets the pwm from a uq reference
         void setSVPWM(float Uq, float Ud, float target_el_angle){ //implemented according to https://www.youtube.com/watch?v=QMSWUMEAejg
@@ -551,6 +569,16 @@ class foc_controller{
             return angle;
         }
         float max_reference;
+        float rampTargetAngle(float current_angle, float end_angle,float max_rate,float delta_time){
+            float delta_angle = end_angle - current_angle;
+            float maxDelta = max_rate * delta_time;
+            if (delta_angle > maxDelta) {
+                delta_angle = maxDelta;
+            } else if (delta_angle < -maxDelta) {
+                delta_angle = -maxDelta;
+            }
+            return current_angle + delta_angle;
+        }
 
         //velocity PID
         PIController vel_controller;
@@ -820,14 +848,15 @@ void foc_second_core(){
     encoder encoder(spi0,_PIN_SCK,_PIN_CS,_PIN_MISO,_PIN_MOSI,true);
     foc_controller foc(&drv,&encoder, &cs,7,24,15);
 
+    foc.set_angle(0);
     foc.asoc_driver->enable();
-    foc.angle_target=3;
     
     while(true){
-        printf("ANGLE:%f\n",encoder.get_absolute_angle_deg());
         if(!queue_is_empty(&comm_queue_01)){
-            queue_remove_blocking(&comm_queue_01,&foc.angle_target);
-            printf("SET %f\n",foc.angle_target);
+            float new_target;
+            queue_remove_blocking(&comm_queue_01,&new_target);
+            printf("SET %f\n",new_target);
+            foc.set_angle(new_target);
         }
         foc.loop();
         tight_loop_contents();
