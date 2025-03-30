@@ -201,7 +201,7 @@ class encoder{
             if(reverse)     //this is needed in case the encoder direction is not the same as the phase succession
                 angle_int=16383-angle_int;
             
-            int32_t delta_angle=angle_int-previous_angle_int;
+            int32_t delta_angle=angle_int-previous_angle_int; //phase unwrapping!
             if(delta_angle>8192){
                 //wrapped negatively
                 delta_angle-=16384;
