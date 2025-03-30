@@ -325,9 +325,13 @@ class PIController{
             uint64_t current_time=time_us_64();
             float delta_time=(current_time-previous_time)/1000000.0;
             float proportional_comp=kp*error;
+            printf("%f ",proportional_comp);
             float integral_comp=integral_error+ki*delta_time*0.5*(error+prev_error);  //magic from simplefoc
             //antiwindup
-            //here; i have to find limits
+            if(integral_comp<-24)
+                integral_comp=-24;
+            else if(integral_comp>24)
+                integral_comp=24;
 
             float output=proportional_comp + integral_comp;
             integral_error=integral_comp;
@@ -338,7 +342,6 @@ class PIController{
     private:
         float kp;
         float ki;
-        float kd;
         float integral_error;
         float prev_error;
         uint64_t previous_time;
@@ -346,8 +349,8 @@ class PIController{
 
 //class for foc algorithm
 class foc_controller{
-    public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):vel_controller(0.5,10){
+    public://default pid : 0.5,10
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):vel_controller(0.3,20){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensor;
@@ -390,7 +393,6 @@ class foc_controller{
             float velocity_meas=asoc_encoder->get_velocity();   //~50us
             float vel_error=velocity_target-velocity_meas;
             float uq=vel_controller.compute(vel_error);
-            printf("%f\n",velocity_meas);
             //change direction based on target sign and reference sign (needed for complete loop)
             direction regdir;
             if(velocity_target>0){
@@ -417,13 +419,14 @@ class foc_controller{
             if(uq>max_reference){
                 uq=max_reference;
             }
-
+            
             //send pwm to motor
             setSVPWM(uq,0,get_target_electrical_angle(regdir)); // ~104-140us w/o lookup table   ~80-120us with lookup
 
             motor_current meas_current=asoc_cs->get_motor_current(); //~7us
             meas_current.update_dq_values(get_electrical_angle()); //~50 us w/o lookup table  ~40us with lookup
-            // printf("%f\n",velocity_meas);
+            
+            printf("%f   %f\n",velocity_meas,uq);
             // printf("%f %f %f\n",meas_current.a,meas_current.b,meas_current.c);
             // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
         }
