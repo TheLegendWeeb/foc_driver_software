@@ -384,7 +384,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public://default pid : 0.5,10
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):vel_controller(0.3,20){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):vel_controller(0.3,20),angle_controller(3,20){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensor;
@@ -423,6 +423,9 @@ class foc_controller{
         }
         //foc loop
         void loop(){  //temporary
+            float angle_meas=asoc_encoder->get_absolute_angle_rad();
+            float angle_error=angle_target-angle_meas;
+            velocity_target=angle_controller.compute(angle_error);
             //velocity controller conf ~200us exec (a little cogging at low speeds, prob should fix)
 
             float velocity_meas=asoc_encoder->get_velocity();   //~50us
@@ -461,11 +464,12 @@ class foc_controller{
             motor_current meas_current=asoc_cs->get_motor_current(); //~7us
             meas_current.update_dq_values(get_electrical_angle()); //~50 us w/o lookup table  ~40us with lookup
             
-            printf("%f   %f\n",velocity_meas,uq);
+            printf("%f   %f\n",angle_meas,uq);
             // printf("%f %f %f\n",meas_current.a,meas_current.b,meas_current.c);
             // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
         }
         float velocity_target;
+        float angle_target;
 
         // sets the pwm from a uq reference
         void setSVPWM(float Uq, float Ud, float target_el_angle){ //implemented according to https://www.youtube.com/watch?v=QMSWUMEAejg
@@ -550,6 +554,7 @@ class foc_controller{
 
         //velocity PID
         PIController vel_controller;
+        PIController angle_controller;
 };
 
 // limit switch stuff
@@ -816,13 +821,13 @@ void foc_second_core(){
     foc_controller foc(&drv,&encoder, &cs,7,24,15);
 
     foc.asoc_driver->enable();
-    foc.velocity_target=4*M_PI;
+    foc.angle_target=3;
     
     while(true){
         printf("ANGLE:%f\n",encoder.get_absolute_angle_deg());
         if(!queue_is_empty(&comm_queue_01)){
-            queue_remove_blocking(&comm_queue_01,&foc.velocity_target);
-            printf("SET %f\n",foc.velocity_target);
+            queue_remove_blocking(&comm_queue_01,&foc.angle_target);
+            printf("SET %f\n",foc.angle_target);
         }
         foc.loop();
         tight_loop_contents();
