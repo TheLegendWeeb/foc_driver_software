@@ -325,7 +325,6 @@ class PIController{
             uint64_t current_time=time_us_64();
             float delta_time=(current_time-previous_time)/1000000.0;
             float proportional_comp=kp*error;
-            printf("%f ",proportional_comp);
             float integral_comp=integral_error+ki*delta_time*0.5*(error+prev_error);  //magic from simplefoc
             //antiwindup
             if(integral_comp<-24)
