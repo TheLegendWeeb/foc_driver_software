@@ -204,19 +204,20 @@ class encoder{
             int32_t delta_angle=angle_int-previous_angle_int;
             if(delta_angle>8192){
                 //wrapped negatively
-                done_rotations--;
+                delta_angle-=16384;
             }
             else if(delta_angle<-8192){
                 //wrapped positively
-                done_rotations++;
+                delta_angle+=16384;
             }
+            total_rotations+=delta_angle;
             previous_angle_int=angle_int;
             return angle_int;
         }
         //makes the current angle be the 0 absolute angle
-        void zero_sensor(){
-            zero_offset=get_angle();
-            done_rotations=0;
+        void zero_sensor(){// see if this still works
+            previous_angle_int=get_angle();
+            total_rotations=0;
         }
         // returns angle in DEG
         float get_angle_deg(){
@@ -251,8 +252,9 @@ class encoder{
         }
         
         //returns absolute angle as an int
-        float get_absolute_angle(){
-            return (done_rotations*16384)+get_angle()-zero_offset;
+        int32_t get_absolute_angle(){
+            get_angle(); //we just update the function
+            return total_rotations;
         }
         //returns absolute angle as degrees
         float get_absolute_angle_deg(){
@@ -269,10 +271,9 @@ class encoder{
             const uint16_t ANGLE_READ_COMMAND=0xFFFF;
             
             //variables to track absoulte angle
-            uint16_t previous_angle_int=0;
-            int done_rotations;
+            uint16_t previous_angle_int;
+            int32_t total_rotations;
             bool reverse;
-            uint16_t zero_offset;
 
             //variables for velocity funcion
             float old_angle=0;
@@ -473,7 +474,8 @@ class foc_controller{
             
 
             old_update_time=current_time;
-            // printf("%f   %f\n",angle_meas,uq);
+            printf("%d   %d\n",asoc_encoder->get_absolute_angle(),asoc_encoder->get_angle());
+            // printf("%f   %f  %f\n",angle_meas,uq,angle_target);
             // printf("%f %f %f\n",meas_current.a,meas_current.b,meas_current.c);
             // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
         }
