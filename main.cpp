@@ -474,8 +474,7 @@ class foc_controller{
             
 
             old_update_time=current_time;
-            printf("%d   %d\n",asoc_encoder->get_absolute_angle(),asoc_encoder->get_angle());
-            // printf("%f   %f  %f\n",angle_meas,uq,angle_target);
+            printf("%f   %f  %f\n",angle_target,uq,angle_meas);
             // printf("%f %f %f\n",meas_current.a,meas_current.b,meas_current.c);
             // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
         }
