@@ -45,6 +45,8 @@
 #define _PIover3    1.0471975512
 #define _SQRT3      1.7320508075
 #define _1overSQRT3 0.5773502691
+#define _twothirds 0.666666666
+#define _sqrt3over2 0.86602540378
 
 
 //this clamps an angle to the 0 to 2PI range
@@ -105,10 +107,8 @@ class motor_current{
         void update_ab_values(){
             //formulas from https://www.ti.com/lit/an/bpra048/bpra048.pdf   ; tested using https://www.mathworks.com/help/mcb/ref/clarketransform.html
             //simplefoc does something about sign too
-            // alpha = (2/3.0)*(a-(b-c));
-            // beta = 2*_1overSQRT3*(b-c);
-            alpha = 0.666666666 * (a - 0.5 * (b-c));
-            beta = 0.666666666 * (_SQRT3 * 0.5 * (b - c));
+            alpha=_twothirds*(a-0.5*(b+c));
+            beta=_twothirds*(_sqrt3over2*(b-c));
         }
         // park transform
         void update_dq_values(float el_angle){
@@ -876,7 +876,7 @@ void foc_second_core(){
         tight_loop_contents();
     }
 }
-
+motor_current test_c;
 int main()
 {
     stdio_init_all();
@@ -920,11 +920,11 @@ int main()
         //     tim=time_us_32()+2000*1000;
         // }
 
-        //test current transforms
+        // test current transforms
         // for(float test_theta=0;test_theta<_2PI;test_theta+=0.05){
         //     test_c.a=sin(test_theta);
-        //     test_c.b=sin(test_theta+(2*M_PI)/3.0);
-        //     test_c.c=sin(test_theta+(4*M_PI)/3.0);
+        //     test_c.b=sin(test_theta-(2*M_PI)/3.0);
+        //     test_c.c=sin(test_theta+(2*M_PI)/3.0);
         //     // test_c.a=1.0;
         //     // test_c.b=2.0;
         //     // test_c.c=3.0;
@@ -985,7 +985,6 @@ int main()
 
         // stp1.loop();
         // stp2.loop();
-        tight_loop_contents();
     }
 }
             
