@@ -396,7 +396,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public://default pid : 0.5,10
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(0.1,10),vel_controller(0.3,20),angle_controller(15,40){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(5,200),vel_controller(0.3,20),angle_controller(15,40){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensor;
@@ -453,43 +453,25 @@ class foc_controller{
             // float uq=vel_controller.compute(vel_error);
 
             //current controller
+            float electrical_angle=get_electrical_angle();
             motor_current meas_current=asoc_cs->get_motor_current(); 
-            meas_current.update_dq_values(get_electrical_angle());
-            float iq_target=-0.3;
+            meas_current.update_dq_values(electrical_angle);
+            float iq_target=-0; //this is basically the torque reference
             float current_error=iq_target-meas_current.q;
             float uq=current_controller.compute(current_error);
 
-            //change direction based on target sign and reference sign (needed for complete loop)
-            direction regdir;
-            // if(velocity_target>0){
-                regdir=direction::CW;
-            //     if(uq<0){
-            //         if(regdir == direction::CW)
-            //             regdir=direction::CCW;
-            //         else
-            //             regdir=direction::CW;
-            //     }
-            // }
-            // else{
-            //     regdir=direction::CCW;
-            //     if(uq>0){
-            //         if(regdir == direction::CW)
-            //             regdir=direction::CCW;
-            //         else
-            //             regdir=direction::CW;
-            //     }
-            // }
-                
-            uq=fabs(uq);
             //avoid over-modulation
-            if(uq>max_reference){
+            if(uq>max_reference && uq>0){
                 uq=max_reference;
+            }
+            else if(uq<-max_reference && uq<0){
+                uq=-max_reference;
             }
             
             //send pwm to motor
-            setSVPWM(uq,0,get_target_electrical_angle(regdir)); // ~104-140us w/o lookup table   ~80-120us with lookup
+            setSVPWM(uq,0,clamp_rad(electrical_angle+M_PI_2)); // ~104-140us w/o lookup table   ~80-120us with lookup
 
-            printf("%f %f %f\n",uq,meas_current.q,velocity_meas);
+            printf("%f %f %f %f\n",uq,meas_current.q,iq_target,velocity_meas);
             old_update_time=current_time;
         }
         float velocity_target;
@@ -574,14 +556,6 @@ class foc_controller{
         float el_angle_offset;
         float get_electrical_angle(){
             return clamp_rad(motor_pole_pairs*asoc_encoder->get_angle_rad()-el_angle_offset);
-        }
-        float get_target_electrical_angle(direction dir){
-            float angle=get_electrical_angle();
-            if(dir==direction::CW)
-                angle=clamp_rad(angle-M_PI_2);
-            else
-                angle=clamp_rad(angle+M_PI_2);
-            return angle;
         }
         float max_reference;
         float rampTargetAngle(float current_angle, float end_angle,float max_rate,float delta_time){
