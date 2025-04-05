@@ -12,8 +12,10 @@
 //current sense pins
 #define _CURRENT_SENSE_PIN_A 26
 #define _CURRENT_SENSE_PIN_B 27
+#define _CURRENT_SENSE_PIN_C 28
 #define _CURRENT_SENSE_CHANNEL_A 0
 #define _CURRENT_SENSE_CHANNEL_B 1
+#define _CURRENT_SENSE_CHANNEL_C 2
 //motor two phase resistance:16.6
 
 // SPI Defines
@@ -122,12 +124,15 @@ class motor_current{
 //class for the current sensor
 class current_sensor{
     public:
-        current_sensor(int cs_phase_a_pin, int cs_phase_b_pin){
+        current_sensor(int cs_phase_a_pin, int cs_phase_b_pin, int cs_phase_c_pin){
             pinA=cs_phase_a_pin;
             pinB=cs_phase_b_pin;
+            pinC=cs_phase_c_pin;
+
             adc_init();
             adc_gpio_init(pinA);
             adc_gpio_init(pinB);
+            adc_gpio_init(pinC);
 
             calculate_offset_voltage();
         }
@@ -135,36 +140,43 @@ class current_sensor{
             motor_current current;
             current.a=read_raw_voltage(_CURRENT_SENSE_CHANNEL_A)-center_offset_voltage_a;
             current.b=read_raw_voltage(_CURRENT_SENSE_CHANNEL_B)-center_offset_voltage_b;
+            current.c=read_raw_voltage(_CURRENT_SENSE_CHANNEL_C)-center_offset_voltage_c;
             current.a/=gain;
             current.b/=gain;
-            current.c=-current.a-current.b;
+            current.c/=gain;
             return current;
         }
         
     private:
         uint pinA;
         uint pinB;
-        const float VCC_Sensor=5.0;
+        uint pinC;
+        const float VCC_ADC_PICO=3.3;
         const float BIT_STEP=4096.0;
-        const float gain=0.255; //test this without current limiting by changing voltage
+        const float gain=0.165; //test this without current limiting by changing voltage
         float center_offset_voltage_a=0;
         float center_offset_voltage_b=0;
+        float center_offset_voltage_c=0;
+
 
         float read_raw_voltage(int channel){
             adc_select_input(channel);
             float voltage=adc_read();
-            return (voltage/BIT_STEP)*VCC_Sensor;
+            return (voltage/BIT_STEP)*VCC_ADC_PICO;
         }
         void calculate_offset_voltage(){
             sleep_ms(500);
             center_offset_voltage_a=0;
             center_offset_voltage_b=0;
+            center_offset_voltage_c=0;
             for(int i=0;i<10000;i++){
                 center_offset_voltage_a+=read_raw_voltage(_CURRENT_SENSE_CHANNEL_A);
                 center_offset_voltage_b+=read_raw_voltage(_CURRENT_SENSE_CHANNEL_B);
+                center_offset_voltage_c+=read_raw_voltage(_CURRENT_SENSE_CHANNEL_C);
             }
             center_offset_voltage_a/=10000.0;
             center_offset_voltage_b/=10000.0;
+            center_offset_voltage_c/=10000.0;
         }
 };
 
@@ -433,7 +445,8 @@ class foc_controller{
             float angle_meas=asoc_encoder->get_absolute_angle_rad();
             old_angle_target=rampTargetAngle(old_angle_target,angle_target,angle_ramp,delta_time);
             float angle_error=old_angle_target-angle_meas;
-            velocity_target=angle_controller.compute(angle_error);
+            velocity_target=_2PI;
+            // velocity_target=angle_controller.compute(angle_error);
             //velocity controller conf ~200us exec (a little cogging at low speeds, prob should fix)
 
             float velocity_meas=asoc_encoder->get_velocity();   //~50us
@@ -474,9 +487,9 @@ class foc_controller{
             
 
             old_update_time=current_time;
-            printf("%f   %f  %f\n",angle_target,uq,angle_meas);
+            // printf("%f   %f  %f\n",angle_target,uq,angle_meas);
             // printf("%f %f %f\n",meas_current.a,meas_current.b,meas_current.c);
-            // printf("%f %f %f %f %f %f %f      %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q,get_electrical_angle());
+            printf("%f %f %f %f %f %f %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q);
         }
         float velocity_target;
         float angle_target;
@@ -844,7 +857,7 @@ void foc_second_core(){
     stdio_init_all();
 
     // foc objects initialization
-    current_sensor cs(_CURRENT_SENSE_PIN_A,_CURRENT_SENSE_PIN_B);
+    current_sensor cs(_CURRENT_SENSE_PIN_A,_CURRENT_SENSE_PIN_B,_CURRENT_SENSE_PIN_C);
     bridge_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
     encoder encoder(spi0,_PIN_SCK,_PIN_CS,_PIN_MISO,_PIN_MOSI,true);
     foc_controller foc(&drv,&encoder, &cs,7,24,15);
