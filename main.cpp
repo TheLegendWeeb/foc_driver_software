@@ -396,7 +396,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public://default pid : 0.5,10
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):vel_controller(0.3,20),angle_controller(15,40){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(0.1,10),vel_controller(0.3,20),angle_controller(15,40){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensor;
@@ -445,33 +445,40 @@ class foc_controller{
             float angle_meas=asoc_encoder->get_absolute_angle_rad();
             old_angle_target=rampTargetAngle(old_angle_target,angle_target,angle_ramp,delta_time);
             float angle_error=old_angle_target-angle_meas;
-            velocity_target=_2PI;
-            // velocity_target=angle_controller.compute(angle_error);
+            velocity_target=angle_controller.compute(angle_error);
             //velocity controller conf ~200us exec (a little cogging at low speeds, prob should fix)
 
             float velocity_meas=asoc_encoder->get_velocity();   //~50us
             float vel_error=velocity_target-velocity_meas;
-            float uq=vel_controller.compute(vel_error);
+            // float uq=vel_controller.compute(vel_error);
+
+            //current controller
+            motor_current meas_current=asoc_cs->get_motor_current(); 
+            meas_current.update_dq_values(get_electrical_angle());
+            float iq_target=-0.3;
+            float current_error=iq_target-meas_current.q;
+            float uq=current_controller.compute(current_error);
+
             //change direction based on target sign and reference sign (needed for complete loop)
             direction regdir;
-            if(velocity_target>0){
+            // if(velocity_target>0){
                 regdir=direction::CW;
-                if(uq<0){
-                    if(regdir == direction::CW)
-                        regdir=direction::CCW;
-                    else
-                        regdir=direction::CW;
-                }
-            }
-            else{
-                regdir=direction::CCW;
-                if(uq>0){
-                    if(regdir == direction::CW)
-                        regdir=direction::CCW;
-                    else
-                        regdir=direction::CW;
-                }
-            }
+            //     if(uq<0){
+            //         if(regdir == direction::CW)
+            //             regdir=direction::CCW;
+            //         else
+            //             regdir=direction::CW;
+            //     }
+            // }
+            // else{
+            //     regdir=direction::CCW;
+            //     if(uq>0){
+            //         if(regdir == direction::CW)
+            //             regdir=direction::CCW;
+            //         else
+            //             regdir=direction::CW;
+            //     }
+            // }
                 
             uq=fabs(uq);
             //avoid over-modulation
@@ -482,14 +489,8 @@ class foc_controller{
             //send pwm to motor
             setSVPWM(uq,0,get_target_electrical_angle(regdir)); // ~104-140us w/o lookup table   ~80-120us with lookup
 
-            motor_current meas_current=asoc_cs->get_motor_current(); //~7us
-            meas_current.update_dq_values(get_electrical_angle()); //~50 us w/o lookup table  ~40us with lookup
-            
-
+            printf("%f %f %f\n",uq,meas_current.q,velocity_meas);
             old_update_time=current_time;
-            // printf("%f   %f  %f\n",angle_target,uq,angle_meas);
-            // printf("%f %f %f\n",meas_current.a,meas_current.b,meas_current.c);
-            printf("%f %f %f %f %f %f %f\n",meas_current.a,meas_current.b,meas_current.c,meas_current.alpha,meas_current.beta,meas_current.d,meas_current.q);
         }
         float velocity_target;
         float angle_target;
@@ -595,6 +596,7 @@ class foc_controller{
         }
 
         //velocity PID
+        PIController current_controller;
         PIController vel_controller;
         PIController angle_controller;
 };
@@ -876,7 +878,7 @@ void foc_second_core(){
         tight_loop_contents();
     }
 }
-motor_current test_c;
+
 int main()
 {
     stdio_init_all();
