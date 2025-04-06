@@ -488,7 +488,7 @@ class foc_controller{
             //send pwm to motor
             setSVPWM(uq,0,clamp_rad(electrical_angle+M_PI_2)); // ~104-140us w/o lookup table   ~80-120us with lookup
 
-            printf("%f %f %f %f\n",uq,meas_current.q,iq_target,velocity_meas);
+            //printf("%f %f %f %f\n",uq,meas_current.q,iq_target,velocity_meas);
             old_update_time=current_time;
         }
         float velocity_target;
@@ -867,7 +867,6 @@ void foc_second_core(){
             foc.set_angle(new_target);
         }
         foc.loop();
-        tight_loop_contents();
     }
 }
 
