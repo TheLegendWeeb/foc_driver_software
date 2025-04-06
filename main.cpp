@@ -180,11 +180,28 @@ class current_sensor{
         }
 };
 
+// LP filter
+class LPF{
+    public:
+        LPF(float alpha){
+            this->alpha=alpha;
+            prev_output=0;
+        }
+        float compute(float input){
+            float output=alpha*input+(1.0f-alpha)*prev_output;
+            prev_output=output;
+            return output;
+        }
+    private:
+        float alpha;
+        float prev_output;
+};
+
 // spi encoder class
 class encoder{
     public:
         // class constructor
-        encoder(spi_inst_t *spi_channel,uint sck_pin,uint cs_pin, uint miso_pin, uint mosi_pin, bool reverse=false){
+        encoder(spi_inst_t *spi_channel,uint sck_pin,uint cs_pin, uint miso_pin, uint mosi_pin, bool reverse=false):vel_filter(0.05){
             spi_init(spi_channel,1000*1000); // spi @ 1MHZ
             spi_set_format(spi_channel,16,SPI_CPOL_0,SPI_CPHA_1,SPI_MSB_FIRST); //mode 1 spi, 16 bit
             gpio_set_function(miso_pin, GPIO_FUNC_SPI);
@@ -259,8 +276,7 @@ class encoder{
             old_time=current_time;
 
             float raw_velocity=delta_angle/delta_time; //rad/s
-            smoothed_velocity = ALPHA * raw_velocity + (1 - ALPHA) * smoothed_velocity; //LP FILTER
-            return smoothed_velocity;
+            return vel_filter.compute(raw_velocity);
         }
         
         //returns absolute angle as an int
@@ -288,10 +304,9 @@ class encoder{
             bool reverse;
 
             //variables for velocity funcion
+            LPF vel_filter;
             float old_angle=0;
             uint64_t old_time=0;
-            float smoothed_velocity=0;
-            float ALPHA=0.05; //5% weight seems fine
 };
 
 // class for the 1/2 bridge drv8318 driver
@@ -362,11 +377,12 @@ class bridge_driver{
 //PID Controller
 class PIController{
     public:
-        PIController(float kp,float ki){
+        PIController(float kp,float ki,float max_output){
             this->kp=kp;
             this->ki=ki;
             this->integral_error=0;
             this->prev_error=0;
+            this->max_output=max_output;
             previous_time=time_us_64();
         }
         float compute(float error){
@@ -375,10 +391,10 @@ class PIController{
             float proportional_comp=kp*error;
             float integral_comp=integral_error+ki*delta_time*0.5*(error+prev_error);  //magic from simplefoc  ;; Trapezoidal integration?
             //antiwindup
-            if(integral_comp<-24)
-                integral_comp=-24;
-            else if(integral_comp>24)
-                integral_comp=24;
+            if(integral_comp<-max_output)
+                integral_comp=-max_output;
+            else if(integral_comp>max_output)
+                integral_comp=max_output;
             float output=proportional_comp + integral_comp;
             integral_error=integral_comp;
             prev_error=error;
@@ -391,12 +407,13 @@ class PIController{
         float integral_error;
         float prev_error;
         uint64_t previous_time;
+        float max_output;
 };
 
 //class for foc algorithm
 class foc_controller{
     public://default pid : 0.5,10
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(5,200),vel_controller(0.3,20),angle_controller(15,40){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(5,200,24),iq_filter(0.1),vel_controller(-0.3,-20,1.1),angle_controller(15,40,50){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensor;
@@ -450,16 +467,16 @@ class foc_controller{
 
             float velocity_meas=asoc_encoder->get_velocity();   //~50us
             float vel_error=velocity_target-velocity_meas;
-            // float uq=vel_controller.compute(vel_error);
-
+            float iq_target=vel_controller.compute(vel_error);
             //current controller
             float electrical_angle=get_electrical_angle();
             motor_current meas_current=asoc_cs->get_motor_current(); 
             meas_current.update_dq_values(electrical_angle);
-            float iq_target=-0; //this is basically the torque reference
+            meas_current.q=iq_filter.compute(meas_current.q); //low pass filter for iq current/
             float current_error=iq_target-meas_current.q;
             float uq=current_controller.compute(current_error);
-
+            //uq should be filtered instead of iq, but it oscillates if weight is too low. might have to adjust pid/ add rate limit to uq
+            
             //avoid over-modulation
             if(uq>max_reference && uq>0){
                 uq=max_reference;
@@ -573,6 +590,7 @@ class foc_controller{
         PIController current_controller;
         PIController vel_controller;
         PIController angle_controller;
+        LPF iq_filter;
 };
 
 // limit switch stuff
