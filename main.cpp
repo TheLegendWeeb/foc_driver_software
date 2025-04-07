@@ -460,7 +460,7 @@ class foc_controller{
             uint64_t current_time=time_us_64();
             float delta_time=(current_time-old_update_time)/1000000.0;
 
-            //angle controller (this jumps for angle_target=0)
+            //angle controller (this jumps for angle_target=0; also it only sometimes jumps)
             float angle_meas=asoc_encoder->get_absolute_angle_rad();
             old_angle_target=rampTargetAngle(old_angle_target,angle_target,angle_ramp,delta_time);
             float angle_error=old_angle_target-angle_meas;
