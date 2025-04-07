@@ -431,10 +431,22 @@ class foc_controller{
             this->current_limit=current_limit;
             this->power_supply_voltage=power_supply_voltage;
             max_reference=power_supply_voltage/M_SQRT3;
-            //hard current limiting. This is only used w/o current sense
-
+            
+            //current limiting; not done
             this->motor_phase_resistance=phase_resistance;
+            
+            //default reference values
+            uq=0;
+            iq_target=0;
+            velocity_target=0;
             angle_target=0;
+            //default manual reference values
+            mode=3; //default mode is angle control
+            manual_uq=0;
+            manual_iq_target=0;
+            manual_velocity_target=0;
+            manual_angle_target=0;
+
             el_angle_offset=0;
             old_update_time=0;
             angle_ramp=6;
@@ -463,27 +475,40 @@ class foc_controller{
             asoc_driver->disable();
         }
         //foc loop
-        void loop(){  //temporary
+        void loop(){
+            //calculate dt
             uint64_t current_time=time_us_64();
             float delta_time=(current_time-old_update_time)/1000000.0;
+            old_update_time=current_time;
 
             //angle controller (this jumps for angle_target=0; also it only sometimes jumps)
+            if(mode==3)
+                angle_target=manual_angle_target;
             float angle_meas=asoc_encoder->get_absolute_angle_rad();
             old_angle_target=rampTargetAngle(old_angle_target,angle_target,angle_ramp,delta_time);
             float angle_error=old_angle_target-angle_meas;
             velocity_target=angle_controller.compute(angle_error);
+
             //velocity controller conf ~200us exec (this doesnt jump for velocity target=0)
+            if(mode==2)
+                velocity_target=manual_velocity_target;
             float velocity_meas=asoc_encoder->get_velocity(); 
             float vel_error=velocity_target-velocity_meas;
-            float iq_target=vel_controller.compute(vel_error);
+            iq_target=vel_controller.compute(vel_error);
+
             //current controller
+            if(mode==1)
+                iq_target=manual_iq_target;
             float electrical_angle=get_electrical_angle();
             motor_current meas_current=asoc_cs->get_motor_current(); 
             meas_current.update_dq_values(electrical_angle);
             meas_current.q=iq_filter.compute(meas_current.q); //low pass filter for iq current
             float current_error=iq_target-meas_current.q;
-            float uq=current_controller.compute(current_error);
+            uq=current_controller.compute(current_error);
             
+            //voltage controller
+            if(mode==0)
+                uq=manual_uq;
             //avoid over-modulation
             if(uq>max_reference && uq>0){
                 uq=max_reference;
@@ -496,16 +521,48 @@ class foc_controller{
             setSVPWM(uq,0,wrap_rad(electrical_angle+M_PI_2));
 
             printf("%f %f %f %f\n",velocity_meas,iq_target,uq,angle_meas);
-            old_update_time=current_time;
         }
+        //pid target variables
+        float uq;
+        float iq_target;
         float velocity_target;
         float angle_target;
-        float old_angle_target;
+
+        float old_angle_target; //for angle rate_limit
         float old_update_time; //for calculating dt;
         float angle_ramp;  //in rad/sec
 
+        ///// FUNCTIONS FOR MODE SELECTION AND TARGETS
+        int mode;
+        float manual_uq;
+        float manual_iq_target;
+        float manual_velocity_target;
+        float manual_angle_target;
+        //sets the controller mode; 3=angle, 2=velocity, 1=torque, 0=voltage reference
+        void set_mode(int mode){
+            if(mode >=0 && mode <=3)
+                //this should also set a default target for the mode
+                this->mode=mode;
+        }
+        //sets the angle target: use in angle control mode
         void set_angle(float angle){
-            angle_target=angle;
+            if(mode==3)
+                manual_angle_target=angle;
+        }
+        //sets the velocity target; use in velocity control mode
+        void set_velocity(float velocity){
+            if(mode==2)
+                manual_velocity_target=velocity;
+        }
+        //sets the torque (iq) target; use in torque control mode
+        void set_torque(float iq){
+            if(mode==1)
+                manual_iq_target=iq;
+        }
+        //sets the uq reference directly; use in voltage reference mode
+        void set_uq(float uq){
+            if(mode ==0)
+                manual_uq=uq;
         }
 
 
@@ -863,7 +920,8 @@ void foc_second_core(){
     encoder encoder(spi0,_PIN_SCK,_PIN_CS,_PIN_MISO,_PIN_MOSI,true);
     foc_controller foc(&drv,&encoder, &cs,7,24,15);
 
-    foc.set_angle(0);
+    foc.set_mode(3); 
+    foc.set_angle(2);
     foc.asoc_driver->enable();
     
     while(true){
