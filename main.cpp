@@ -985,9 +985,8 @@ int main()
     // stp1.move_mm(50,stepper_driver::CCW);
     // stp2.move(200*4,stepper_driver::CCW);
 
-    #define BUFFER_SIZE 32
     while (true) {
-        char uart_message[BUFFER_SIZE];
+        char uart_message[32];
         if (fgets(uart_message, 32, stdin) != NULL) {
             //extract first character from string to determine command type. for now i will use numbers, but i will change this to letters and add possibility of arguments
             if (uart_message[0] >= '0' && uart_message[0] <= '9') { //validate of command is a digit between 0 and 9; will change this to validating individual commands later
