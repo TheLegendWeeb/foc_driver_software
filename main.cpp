@@ -388,7 +388,7 @@ class PIController{
         }
         float compute(float error){
             uint64_t current_time=time_us_64();
-            float delta_time=(current_time-previous_time)/1000000.0;
+            float delta_time=(current_time-previous_time)/1000000.0; //i could get rid of this by using the time from the foc loop
             float proportional_comp=kp*error;
             float integral_comp=integral_error+ki*delta_time*0.5*(error+prev_error);  //magic from simplefoc  ;; Trapezoidal integration?
             //antiwindup
@@ -460,25 +460,22 @@ class foc_controller{
             uint64_t current_time=time_us_64();
             float delta_time=(current_time-old_update_time)/1000000.0;
 
-            //angle controller
+            //angle controller (this jumps for angle_target=0)
             float angle_meas=asoc_encoder->get_absolute_angle_rad();
             old_angle_target=rampTargetAngle(old_angle_target,angle_target,angle_ramp,delta_time);
             float angle_error=old_angle_target-angle_meas;
             velocity_target=angle_controller.compute(angle_error);
-            //velocity controller conf ~200us exec (a little cogging at low speeds, prob should fix)
-            float velocity_meas=asoc_encoder->get_velocity();   //~50us
+            //velocity controller conf ~200us exec (this doesnt jump for velocity target=0)
+            float velocity_meas=asoc_encoder->get_velocity(); 
             float vel_error=velocity_target-velocity_meas;
             float iq_target=vel_controller.compute(vel_error);
             //current controller
             float electrical_angle=get_electrical_angle();
             motor_current meas_current=asoc_cs->get_motor_current(); 
             meas_current.update_dq_values(electrical_angle);
-            meas_current.q=iq_filter.compute(meas_current.q); //low pass filter for iq current/
+            meas_current.q=iq_filter.compute(meas_current.q); //low pass filter for iq current
             float current_error=iq_target-meas_current.q;
             float uq=current_controller.compute(current_error);
-
-            // float non_filt_uq=uq; //for debugging
-            //uq should be filtered instead of iq, but it oscillates if weight is too low. might have to adjust pid/ add rate limit to uq
             
             //avoid over-modulation
             if(uq>max_reference && uq>0){
@@ -489,7 +486,7 @@ class foc_controller{
             }
             
             //send pwm to motor
-            setSVPWM(uq,0,clamp_rad(electrical_angle+M_PI_2)); // ~104-140us w/o lookup table   ~80-120us with lookup
+            setSVPWM(uq,0,clamp_rad(electrical_angle+M_PI_2));
 
             printf("%f %f %f %f\n",velocity_meas,iq_target,uq,angle_meas);
             old_update_time=current_time;
