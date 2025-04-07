@@ -49,8 +49,8 @@
 #define _sqrt3over2 0.86602540378
 
 
-//this clamps an angle to the 0 to 2PI range
-float clamp_rad(float angle_rad){
+//this wraps an angle to the 0 to 2PI range
+float wrap_rad(float angle_rad){
     angle_rad=fmod(angle_rad,_2PI);
     if(angle_rad<0)
         angle_rad+=_2PI;
@@ -81,13 +81,13 @@ float sin_aprox(float angle_rad){
 }
 // clamps angle and aprox. sin with a lookup table
 float sin_aprox_clamp(float angle_rad){
-    angle_rad=clamp_rad(angle_rad);
+    angle_rad=wrap_rad(angle_rad);
     return sin_aprox(angle_rad);
 }
 //aproximates cos with a lookup table
 float cos_aprox(float angle_rad){
     //made this work
-    return sin_aprox(clamp_rad(angle_rad+M_PI_2));
+    return sin_aprox(wrap_rad(angle_rad+M_PI_2));
 }
 
 
@@ -397,7 +397,7 @@ class PIController{
             else if(integral_comp>max_output)
                 integral_comp=max_output;
             float output=proportional_comp + integral_comp;
-
+            //cant get ramp to work
             integral_error=integral_comp;
             prev_error=error;
             previous_time=current_time;
@@ -414,7 +414,7 @@ class PIController{
 
 //class for foc algorithm
 class foc_controller{
-    public://default pid : 0.5,10
+    public:
         foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(3,300,24),iq_filter(0.01),vel_controller(-0.3,-10,1.4),angle_controller(15,40,50){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
@@ -449,7 +449,7 @@ class foc_controller{
             }
             
             float el_angle_offset_reconstructed=atan2(sum_sin/tests,sum_cos/tests);
-            el_angle_offset=clamp_rad(el_angle_offset_reconstructed);
+            el_angle_offset=wrap_rad(el_angle_offset_reconstructed);
             asoc_encoder->zero_sensor();
             old_angle_target=asoc_encoder->get_absolute_angle_rad();
             setSVPWM(0,0,0);
@@ -486,7 +486,7 @@ class foc_controller{
             }
             
             //send pwm to motor
-            setSVPWM(uq,0,clamp_rad(electrical_angle+M_PI_2));
+            setSVPWM(uq,0,wrap_rad(electrical_angle+M_PI_2));
 
             printf("%f %f %f %f\n",velocity_meas,iq_target,uq,angle_meas);
             old_update_time=current_time;
@@ -506,7 +506,7 @@ class foc_controller{
         // sets the pwm from a uq reference
         void setSVPWM(float Uq, float Ud, float target_el_angle){ //implemented according to https://www.youtube.com/watch?v=QMSWUMEAejg
             //el_angle has to be clamped between 0 and 2pi
-            target_el_angle=clamp_rad(target_el_angle);
+            target_el_angle=wrap_rad(target_el_angle);
             int sector = int(target_el_angle/_PIover3)+1;
 
             float T1,T2,T0;
@@ -572,7 +572,7 @@ class foc_controller{
         uint motor_pole_pairs;
         float el_angle_offset;
         float get_electrical_angle(){
-            return clamp_rad(motor_pole_pairs*asoc_encoder->get_angle_rad()-el_angle_offset);
+            return wrap_rad(motor_pole_pairs*asoc_encoder->get_angle_rad()-el_angle_offset);
         }
         float max_reference;
         float rampTargetAngle(float current_angle, float end_angle,float max_rate,float delta_time){
