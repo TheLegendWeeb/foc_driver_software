@@ -520,7 +520,7 @@ class foc_controller{
             //send pwm to motor
             setSVPWM(uq,0,wrap_rad(electrical_angle+M_PI_2));
 
-            printf("%f %f %f %f\n",velocity_meas,iq_target,uq,angle_meas);
+            // printf("%f %f %f %f\n",velocity_meas,iq_target,uq,angle_meas);
         }
         //pid target variables
         float uq;
@@ -563,6 +563,23 @@ class foc_controller{
         void set_uq(float uq){
             if(mode ==0)
                 manual_uq=uq;
+        }
+        //sets a target based on the current mode
+        void set_target(float target){  //helper function for setting a target based on the mode; i use this when getting commands from core 0
+            switch (mode){
+                case 0:
+                    set_uq(target);
+                    break;
+                case 1:
+                    set_torque(target);
+                    break;
+                case 2:
+                    set_velocity(target);
+                    break;
+                case 3:
+                    set_angle(target);
+                    break;
+            }
         }
 
 
@@ -910,6 +927,10 @@ void six_step(bridge_driver* driver){
 
 queue_t comm_queue_01; //queue for communication from core 0 to core 1
 queue_t comm_queue_10;
+struct command_packet{
+    float command;
+    float argument;
+};
 
 void foc_second_core(){
     stdio_init_all();
@@ -921,16 +942,19 @@ void foc_second_core(){
     foc_controller foc(&drv,&encoder, &cs,7,24,15);
 
     foc.set_mode(3); 
-    foc.set_angle(2);
+    foc.set_angle(0);
     foc.asoc_driver->enable();
     
+    command_packet comm_packet;
     while(true){
+        //listen for commands from core 0
         if(!queue_is_empty(&comm_queue_01)){
-            float new_target;
-            queue_remove_blocking(&comm_queue_01,&new_target);
-            printf("SET %f\n",new_target);
-            foc.set_angle(new_target);
+            queue_remove_blocking(&comm_queue_01,&comm_packet);
+            foc.set_mode(comm_packet.command);
+            foc.set_target(comm_packet.argument);
+            printf("SET MODE %f   TARGET %f\n",comm_packet.command,comm_packet.argument);
         }
+        //main foc loop
         foc.loop();
     }
 }
@@ -941,8 +965,10 @@ int main()
     
     construct_sin_table();
 
-    queue_init(&comm_queue_01,sizeof(float),1);
+    //multi core init stuff
+    queue_init(&comm_queue_01,sizeof(command_packet),1);
     multicore_launch_core1(foc_second_core);
+    command_packet cmd_packet;
 
     //adds limit switch interrupts for steppers
     // add_limit_switch(_LIMIT_SWITCH_RIGHT);
@@ -961,14 +987,20 @@ int main()
 
     #define BUFFER_SIZE 32
     while (true) {
-
-        char command[32];
-        if (fgets(command, 32, stdin) != NULL) {
-            // Convert the string to a float.
-            float value = strtof(command, NULL);
-            printf("NEW VELOCITY: %f\n", value);
-            queue_add_blocking(&comm_queue_01,&value);
-
+        char uart_message[BUFFER_SIZE];
+        if (fgets(uart_message, 32, stdin) != NULL) {
+            //extract first character from string to determine command type. for now i will use numbers, but i will change this to letters and add possibility of arguments
+            if (uart_message[0] >= '0' && uart_message[0] <= '9') { //validate of command is a digit between 0 and 9; will change this to validating individual commands later
+                cmd_packet.command = uart_message[0] - '0'; //convert char to int
+                if(cmd_packet.command >=0 && cmd_packet.command <=3){ //validate mode
+                    // Convert the string to a float.
+                    cmd_packet.argument = strtof(uart_message+1, NULL);  //convert the rest of the string to a float
+                    printf("NEW VELOCITY: %f\n", cmd_packet.argument);
+                    queue_add_blocking(&comm_queue_01,&cmd_packet); 
+                }
+            }
+            else
+                printf("Invalid command. Please enter a number.\n");
         } else {
             printf("Error reading input.\n");
         }
