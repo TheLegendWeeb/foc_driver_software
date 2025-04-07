@@ -215,6 +215,7 @@ class encoder{
             gpio_put(cs_pin, 1);
             this->reverse=reverse;
             zero_sensor();
+            old_angle=get_angle_rad();
         }
         // returns angle in int form
         uint16_t get_angle(){ //first read sends the read command and the second has the data
@@ -396,6 +397,7 @@ class PIController{
             else if(integral_comp>max_output)
                 integral_comp=max_output;
             float output=proportional_comp + integral_comp;
+
             integral_error=integral_comp;
             prev_error=error;
             previous_time=current_time;
@@ -413,7 +415,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public://default pid : 0.5,10
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(5,200,24),iq_filter(0.1),vel_controller(-0.3,-20,1.1),angle_controller(15,40,50){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(3,300,24),iq_filter(0.01),vel_controller(-0.3,-10,1.4),angle_controller(15,40,50){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensor;
@@ -425,7 +427,6 @@ class foc_controller{
             //hard current limiting. This is only used w/o current sense
 
             this->motor_phase_resistance=phase_resistance;
-            old_angle_target=0;
             angle_target=0;
             el_angle_offset=0;
             old_update_time=0;
@@ -450,6 +451,7 @@ class foc_controller{
             float el_angle_offset_reconstructed=atan2(sum_sin/tests,sum_cos/tests);
             el_angle_offset=clamp_rad(el_angle_offset_reconstructed);
             asoc_encoder->zero_sensor();
+            old_angle_target=asoc_encoder->get_absolute_angle_rad();
             setSVPWM(0,0,0);
             asoc_driver->disable();
         }
@@ -464,7 +466,6 @@ class foc_controller{
             float angle_error=old_angle_target-angle_meas;
             velocity_target=angle_controller.compute(angle_error);
             //velocity controller conf ~200us exec (a little cogging at low speeds, prob should fix)
-
             float velocity_meas=asoc_encoder->get_velocity();   //~50us
             float vel_error=velocity_target-velocity_meas;
             float iq_target=vel_controller.compute(vel_error);
@@ -475,6 +476,8 @@ class foc_controller{
             meas_current.q=iq_filter.compute(meas_current.q); //low pass filter for iq current/
             float current_error=iq_target-meas_current.q;
             float uq=current_controller.compute(current_error);
+
+            // float non_filt_uq=uq; //for debugging
             //uq should be filtered instead of iq, but it oscillates if weight is too low. might have to adjust pid/ add rate limit to uq
             
             //avoid over-modulation
@@ -488,7 +491,7 @@ class foc_controller{
             //send pwm to motor
             setSVPWM(uq,0,clamp_rad(electrical_angle+M_PI_2)); // ~104-140us w/o lookup table   ~80-120us with lookup
 
-            //printf("%f %f %f %f\n",uq,meas_current.q,iq_target,velocity_meas);
+            printf("%f %f %f %f\n",velocity_meas,iq_target,uq,angle_meas);
             old_update_time=current_time;
         }
         float velocity_target;
@@ -849,7 +852,7 @@ queue_t comm_queue_10;
 
 void foc_second_core(){
     stdio_init_all();
-
+    sleep_ms(1000);
     // foc objects initialization
     current_sensor cs(_CURRENT_SENSE_PIN_A,_CURRENT_SENSE_PIN_B,_CURRENT_SENSE_PIN_C);
     bridge_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
