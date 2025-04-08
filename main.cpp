@@ -404,6 +404,10 @@ class PIController{
             else if(integral_comp>max_output)
                 integral_comp=max_output;
             float output=proportional_comp + integral_comp;
+            if(output<-max_output)
+                output=-max_output;
+            else if(output>max_output)
+                output=max_output;
             //cant get ramp to work
             integral_error=integral_comp;
             prev_error=error;
@@ -422,7 +426,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(3,300,24),iq_filter(0.01),vel_controller(-0.3,-10,1.4),angle_controller(15,40,50){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(5,300,24),iq_filter(0.01),vel_controller(-0.3,-10,1.4),angle_controller(15,40,50){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensor;
