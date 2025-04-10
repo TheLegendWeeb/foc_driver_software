@@ -208,7 +208,7 @@ class LPF{
 class encoder{
     public:
         // class constructor
-        encoder(spi_inst_t *spi_channel,uint sck_pin,uint cs_pin, uint miso_pin, uint mosi_pin, bool reverse=false):vel_filter(0.05){
+        encoder(spi_inst_t *spi_channel,uint sck_pin,uint cs_pin, uint miso_pin, uint mosi_pin, bool reverse=false):vel_filter(0.01){
             spi_init(spi_channel,1000*1000); // spi @ 1MHZ
             spi_set_format(spi_channel,16,SPI_CPOL_0,SPI_CPHA_1,SPI_MSB_FIRST); //mode 1 spi, 16 bit
             gpio_set_function(miso_pin, GPIO_FUNC_SPI);
@@ -428,7 +428,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(70,2600,14),iq_filter(0.01),vel_controller(-0.5,-10,1.4),angle_controller(15,40,50){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(70,2600,14),iq_filter(0.01),vel_controller(-0.05,-4,1.3),angle_controller(15,40,50){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensor;
@@ -528,8 +528,9 @@ class foc_controller{
             setSVPWM(uq,0,wrap_rad(electrical_angle+M_PI_2));
 
             // printf("%f %f %f %f\n",velocity_meas,velocity_target,iq_target,uq);
+            //incetinit printarea la consola pentru a ajunge la 250us
             if(cnt%10==0)
-                printf("%f %f %f %f\n",iq_target,meas_current.q,uq,delta_time*1000000.0);
+                printf("%f %f %f %f\n",velocity_target,velocity_meas,meas_current.q,delta_time*1000000.0);
             cnt++;
         }
         //pid target variables
@@ -1024,14 +1025,14 @@ int main()
         //    // foc.velocity_target*=-1;
         //     tim=time_us_32()+2000*1000;
         // }
-        cmd_packet.command=1;
+        cmd_packet.command=2;
         for(;;){
-            cmd_packet.argument=0.1;
+            cmd_packet.argument=10;
             queue_add_blocking(&comm_queue_01,&cmd_packet);
-            sleep_ms(100);
-            cmd_packet.argument=-0.1;
+            sleep_ms(500);
+            cmd_packet.argument=-10;
             queue_add_blocking(&comm_queue_01,&cmd_packet);
-            sleep_ms(100);
+            sleep_ms(500);
             cmd_packet.argument=0;
             queue_add_blocking(&comm_queue_01,&cmd_packet);
             sleep_ms(1500);
