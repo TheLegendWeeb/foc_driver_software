@@ -428,7 +428,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(70,3800,14),iq_filter(0.01),vel_controller(-0.5,-10,1.4),angle_controller(15,40,50){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(70,2600,14),iq_filter(0.01),vel_controller(-0.5,-10,1.4),angle_controller(15,40,50){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensor;
@@ -1026,10 +1026,10 @@ int main()
         // }
         cmd_packet.command=1;
         for(;;){
-            cmd_packet.argument=0.05;
+            cmd_packet.argument=0.1;
             queue_add_blocking(&comm_queue_01,&cmd_packet);
             sleep_ms(100);
-            cmd_packet.argument=-0.05;
+            cmd_packet.argument=-0.1;
             queue_add_blocking(&comm_queue_01,&cmd_packet);
             sleep_ms(100);
             cmd_packet.argument=0;
