@@ -428,7 +428,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(70,2600,14),iq_filter(0.01),vel_controller(-0.05,-4,1.3),angle_controller(15,40,50){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(70,2600,14),iq_filter(0.01),vel_controller(-0.03,-2,1.3),angle_controller(45,450,50){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensor;
@@ -492,7 +492,8 @@ class foc_controller{
             if(mode==3)
                 angle_target=manual_angle_target;
             float angle_meas=asoc_encoder->get_absolute_angle_rad();
-            old_angle_target=rampTargetAngle(old_angle_target,angle_target,angle_ramp,delta_time);
+            // old_angle_target=rampTargetAngle(old_angle_target,angle_target,angle_ramp,delta_time);
+            old_angle_target=angle_target;
             float angle_error=old_angle_target-angle_meas;
             velocity_target=angle_controller.compute(angle_error);
 
@@ -530,7 +531,7 @@ class foc_controller{
             // printf("%f %f %f %f\n",velocity_meas,velocity_target,iq_target,uq);
             //incetinit printarea la consola pentru a ajunge la 250us
             if(cnt%10==0)
-                printf("%f %f %f %f\n",velocity_target,velocity_meas,meas_current.q,delta_time*1000000.0);
+                printf("%f %f %f %f\n",angle_target,angle_meas,velocity_meas,delta_time*1000000.0);
             cnt++;
         }
         //pid target variables
@@ -1025,18 +1026,19 @@ int main()
         //    // foc.velocity_target*=-1;
         //     tim=time_us_32()+2000*1000;
         // }
-        cmd_packet.command=2;
+        cmd_packet.command=3;
         for(;;){
-            cmd_packet.argument=10;
+            cmd_packet.argument=3;
             queue_add_blocking(&comm_queue_01,&cmd_packet);
-            sleep_ms(500);
-            cmd_packet.argument=-10;
+            sleep_ms(1000);
+            cmd_packet.argument=-3;
             queue_add_blocking(&comm_queue_01,&cmd_packet);
-            sleep_ms(500);
+            sleep_ms(1000);
             cmd_packet.argument=0;
             queue_add_blocking(&comm_queue_01,&cmd_packet);
             sleep_ms(1500);
         }
+
         // test current transforms
         // for(float test_theta=0;test_theta<_2PI;test_theta+=0.05){
         //     test_c.a=sin(test_theta);
