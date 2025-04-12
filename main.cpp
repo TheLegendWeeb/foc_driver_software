@@ -428,7 +428,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(70,2600,14),iq_filter(0.01),vel_controller(-0.03,-2,1.3),angle_controller(45,450,50){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(70,2600,14),iq_filter(0.01),vel_controller(-0.03,-5,1.3),angle_controller(50,550,25){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensor;
@@ -492,7 +492,7 @@ class foc_controller{
             if(mode==3)
                 angle_target=manual_angle_target;
             float angle_meas=asoc_encoder->get_absolute_angle_rad();
-            // old_angle_target=rampTargetAngle(old_angle_target,angle_target,angle_ramp,delta_time);
+            old_angle_target=rampTargetAngle(old_angle_target,angle_target,angle_ramp,delta_time);
             old_angle_target=angle_target;
             float angle_error=old_angle_target-angle_meas;
             velocity_target=angle_controller.compute(angle_error);
@@ -531,7 +531,7 @@ class foc_controller{
             // printf("%f %f %f %f\n",velocity_meas,velocity_target,iq_target,uq);
             //incetinit printarea la consola pentru a ajunge la 250us
             if(cnt%10==0)
-                printf("%f %f %f %f\n",angle_target,angle_meas,velocity_meas,delta_time*1000000.0);
+                printf("%f %f %f %f\n",velocity_target,velocity_meas,uq,delta_time*1000000.0);
             cnt++;
         }
         //pid target variables
@@ -955,8 +955,8 @@ void foc_second_core(){
 
     foc.set_mode(3); 
     foc.set_angle(0);
-    foc.set_mode(1);
-    foc.set_target(-0.0);
+    foc.set_mode(2);
+    foc.set_target(_2PI);
     foc.asoc_driver->enable();
     
     command_packet comm_packet;
@@ -1002,41 +1002,21 @@ int main()
 
     while (true) {
         char uart_message[32];
-        // if (fgets(uart_message, 32, stdin) != NULL) {
-        //     //extract first character from string to determine command type. for now i will use numbers, but i will change this to letters and add possibility of arguments
-        //     if (uart_message[0] >= '0' && uart_message[0] <= '9') { //validate of command is a digit between 0 and 9; will change this to validating individual commands later
-        //         cmd_packet.command = uart_message[0] - '0'; //convert char to int
-        //         if(cmd_packet.command >=0 && cmd_packet.command <=3){ //validate mode
-        //             // Convert the string to a float.
-        //             cmd_packet.argument = strtof(uart_message+1, NULL);  //convert the rest of the string to a float
-        //             printf("NEW VELOCITY: %f\n", cmd_packet.argument);
-        //             queue_add_blocking(&comm_queue_01,&cmd_packet); 
-        //         }
-        //     }
-        //     else
-        //         printf("Invalid command. Please enter a number.\n");
-        // } else {
-        //     printf("Error reading input.\n");
-        // }
-        //test main loop timing
-        // uint64_t exectime=time_us_64();
-        // uint64_t donetime=time_us_64();
-        // printf("EXEC %lld\n",donetime-exectime);
-        // if(tim<time_us_32()){
-        //    // foc.velocity_target*=-1;
-        //     tim=time_us_32()+2000*1000;
-        // }
-        cmd_packet.command=3;
-        for(;;){
-            cmd_packet.argument=3;
-            queue_add_blocking(&comm_queue_01,&cmd_packet);
-            sleep_ms(1000);
-            cmd_packet.argument=-3;
-            queue_add_blocking(&comm_queue_01,&cmd_packet);
-            sleep_ms(1000);
-            cmd_packet.argument=0;
-            queue_add_blocking(&comm_queue_01,&cmd_packet);
-            sleep_ms(1500);
+        if (fgets(uart_message, 32, stdin) != NULL) {
+            //extract first character from string to determine command type. for now i will use numbers, but i will change this to letters and add possibility of arguments
+            if (uart_message[0] >= '0' && uart_message[0] <= '9') { //validate of command is a digit between 0 and 9; will change this to validating individual commands later
+                cmd_packet.command = uart_message[0] - '0'; //convert char to int
+                if(cmd_packet.command >=0 && cmd_packet.command <=3){ //validate mode
+                    // Convert the string to a float.
+                    cmd_packet.argument = strtof(uart_message+1, NULL);  //convert the rest of the string to a float
+                    printf("NEW VELOCITY: %f\n", cmd_packet.argument);
+                    queue_add_blocking(&comm_queue_01,&cmd_packet); 
+                }
+            }
+            else
+                printf("Invalid command. Please enter a number.\n");
+        } else {
+            printf("Error reading input.\n");
         }
 
         // test current transforms
