@@ -41,7 +41,7 @@ pico_set_program_name(foc_driver_software "foc_driver_software")
 pico_set_program_version(foc_driver_software "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(foc_driver_software 0)
+pico_enable_stdio_uart(foc_driver_software 1)
 pico_enable_stdio_usb(foc_driver_software 1)
 
 # Add the standard library to the build

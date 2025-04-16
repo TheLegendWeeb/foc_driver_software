@@ -5,6 +5,7 @@
 #include "hardware/adc.h"
 #include "pico/multicore.h"
 #include "pico/util/queue.h"
+#include "hardware/uart.h"
 
 #include <cmath>
 #include <cstring>
@@ -48,6 +49,19 @@
 #define _twothirds  0.666666666
 #define _sqrt3over2 0.86602540378
 
+//UART defines
+#define _UART_ID uart1
+#define _BAUD_RATE 115200
+#define _UART_TX_PIN 8
+#define _UART_RX_PIN 9
+
+//this initializes the UART comms
+void initialize_uart(){
+    uart_init(_UART_ID, _BAUD_RATE);
+    gpio_set_function(_UART_TX_PIN, UART_FUNCSEL_NUM(_UART_ID, _UART_TX_PIN));
+    gpio_set_function(_UART_RX_PIN, UART_FUNCSEL_NUM(_UART_ID, _UART_RX_PIN));
+    uart_set_format(_UART_ID, 8, 1, UART_PARITY_NONE);
+}
 
 //this wraps an angle to the 0 to 2PI range
 float wrap_rad(float angle_rad){
@@ -531,7 +545,7 @@ class foc_controller{
             // printf("%f %f %f %f\n",velocity_meas,velocity_target,iq_target,uq);
             //incetinit printarea la consola pentru a ajunge la 250us
             if(cnt%10==0)
-                printf("%f %f %f %f\n",velocity_target,velocity_meas,uq,delta_time*1000000.0);
+                printf("%f %f %f %f\r\n",velocity_target,velocity_meas,uq,delta_time*1000000.0);
             cnt++;
         }
         //pid target variables
@@ -945,7 +959,7 @@ struct command_packet{
 };
 
 void foc_second_core(){
-    stdio_init_all();
+    stdio_usb_init();
     sleep_ms(1000);
     // foc objects initialization
     current_sensor cs(_CURRENT_SENSE_PIN_A,_CURRENT_SENSE_PIN_B,_CURRENT_SENSE_PIN_C);
@@ -976,8 +990,10 @@ void foc_second_core(){
 
 int main()
 {
-    stdio_init_all();
-    
+    initialize_uart();
+    // stdio_init_all();
+    stdio_usb_init();
+    stdio_uart_init_full(_UART_ID,_BAUD_RATE,-1,_UART_RX_PIN);
     construct_sin_table();
 
     //multi core init stuff
@@ -999,7 +1015,6 @@ int main()
     // stp2.set_dir(stepper_driver::CW);
     // stp1.move_mm(50,stepper_driver::CCW);
     // stp2.move(200*4,stepper_driver::CCW);
-
     while (true) {
         char uart_message[32];
         if (fgets(uart_message, 32, stdin) != NULL) {
