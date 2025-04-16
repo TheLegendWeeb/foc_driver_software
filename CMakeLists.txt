@@ -28,38 +28,38 @@ set(PICO_BOARD pico CACHE STRING "Board type")
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(driver_test C CXX ASM)
+project(inverter_software C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(driver_test main.cpp )
+add_executable(inverter_software main.cpp )
 
-pico_set_program_name(driver_test "driver_test")
-pico_set_program_version(driver_test "0.1")
+pico_set_program_name(inverter_software "inverter_software")
+pico_set_program_version(inverter_software "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(driver_test 0)
-pico_enable_stdio_usb(driver_test 1)
+pico_enable_stdio_uart(inverter_software 0)
+pico_enable_stdio_usb(inverter_software 1)
 
 # Add the standard library to the build
-target_link_libraries(driver_test
+target_link_libraries(inverter_software
         pico_stdlib)
 
 # Add the standard include files to the build
-target_include_directories(driver_test PRIVATE
+target_include_directories(inverter_software PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
 # Add any user requested libraries
-target_link_libraries(driver_test 
+target_link_libraries(inverter_software 
         hardware_spi
         hardware_pwm
         hardware_adc
         pico_multicore
         )
 
-pico_add_extra_outputs(driver_test)
+pico_add_extra_outputs(inverter_software)
 
