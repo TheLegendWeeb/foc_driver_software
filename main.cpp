@@ -544,9 +544,9 @@ class foc_controller{
 
             // printf("%f %f %f %f\n",velocity_meas,velocity_target,iq_target,uq);
             //incetinit printarea la consola pentru a ajunge la 250us
-            if(cnt%10==0)
-                printf("%f %f %f %f\r\n",velocity_target,velocity_meas,uq,delta_time*1000000.0);
-            cnt++;
+            // if(cnt%10==0)
+            //     printf("%f %f %f %f\r\n",velocity_target,velocity_meas,uq,delta_time*1000000.0);
+            // cnt++;
         }
         //pid target variables
         float uq;
@@ -959,7 +959,7 @@ struct command_packet{
 };
 
 void foc_second_core(){
-    stdio_usb_init();
+    // stdio_usb_init();
     sleep_ms(1000);
     // foc objects initialization
     current_sensor cs(_CURRENT_SENSE_PIN_A,_CURRENT_SENSE_PIN_B,_CURRENT_SENSE_PIN_C);
@@ -990,10 +990,16 @@ void foc_second_core(){
 
 int main()
 {
+    stdio_usb_init();
     initialize_uart();
     // stdio_init_all();
-    stdio_usb_init();
-    stdio_uart_init_full(_UART_ID,_BAUD_RATE,-1,_UART_RX_PIN);
+    //stdio_uart_init_full(_UART_ID,_BAUD_RATE,-1,_UART_RX_PIN);
+    while(1){
+        if(uart_is_readable(_UART_ID)){
+            char c=uart_getc(_UART_ID);
+            printf("hi %c\n",c);
+        }
+    }
     construct_sin_table();
 
     //multi core init stuff
