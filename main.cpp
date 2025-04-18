@@ -62,6 +62,18 @@ void initialize_uart(){
     gpio_set_function(_UART_RX_PIN, UART_FUNCSEL_NUM(_UART_ID, _UART_RX_PIN));
     uart_set_format(_UART_ID, 8, 1, UART_PARITY_NONE);
 }
+//reads a string from uart into buffer
+void uart_read_string(char *buffer, size_t buffer_size, uart_inst_t *uart_instance){
+    size_t index=0;
+    while(index < buffer_size-1){ //leave space for null terminator
+        char c=uart_getc(uart_instance);
+        if(c=='\n'){
+            break;
+        }
+        buffer[index++]=c;
+    }
+    buffer[index++]='\0';
+}
 
 //this wraps an angle to the 0 to 2PI range
 float wrap_rad(float angle_rad){
@@ -495,7 +507,7 @@ class foc_controller{
             asoc_driver->disable();
         }
         //foc loop
-        int_fast64_t cnt=0;
+        uint64_t cnt=0;
         void loop(){
             //calculate dt
             uint64_t current_time=time_us_64();
@@ -542,7 +554,6 @@ class foc_controller{
             //send pwm to motor
             setSVPWM(uq,0,wrap_rad(electrical_angle+M_PI_2));
 
-            // printf("%f %f %f %f\n",velocity_meas,velocity_target,iq_target,uq);
             //incetinit printarea la consola pentru a ajunge la 250us
             // if(cnt%10==0)
             //     printf("%f %f %f %f\r\n",velocity_target,velocity_meas,uq,delta_time*1000000.0);
@@ -930,25 +941,6 @@ class stepper_driver{
 
 //temporary functions for testing
 
-// 6 step test function for the driver ; no feedback
-void six_step(bridge_driver* driver){
-    int sixstepdelay=10;
-    driver->enable();
-    driver->set_pwm_duty(1,0,0);
-    sleep_ms(sixstepdelay);
-    driver->set_pwm_duty(1,1,0);
-    sleep_ms(sixstepdelay);
-    driver->set_pwm_duty(0,1,0);
-    sleep_ms(sixstepdelay);
-    driver->set_pwm_duty(0,1,1);
-    sleep_ms(sixstepdelay);
-    driver->set_pwm_duty(0,0,1);
-    sleep_ms(sixstepdelay);
-    driver->set_pwm_duty(1,0,1);
-    sleep_ms(sixstepdelay);
-}
-
-
 //////////////////////////////////////////////////   MAIN LOOPS  ///////////////////////////////////////////////////////////////////////////////////////////
 
 queue_t comm_queue_01; //queue for communication from core 0 to core 1
@@ -959,7 +951,7 @@ struct command_packet{
 };
 
 void foc_second_core(){
-    // stdio_usb_init();
+    stdio_usb_init();
     sleep_ms(1000);
     // foc objects initialization
     current_sensor cs(_CURRENT_SENSE_PIN_A,_CURRENT_SENSE_PIN_B,_CURRENT_SENSE_PIN_C);
@@ -980,26 +972,19 @@ void foc_second_core(){
             queue_remove_blocking(&comm_queue_01,&comm_packet);
             foc.set_mode(comm_packet.command);
             foc.set_target(comm_packet.argument);
-            //printf("SET MODE %f   TARGET %f\n",comm_packet.command,comm_packet.argument);
         }
-        //main foc loop
-        //pi tune
+        // main foc loop
         foc.loop();
     }
 }
 
 int main()
 {
+    // I use usb for printing and uart for getting commands. I do this because i want to use the "better serial plotter" software on pc to tune PI controllers.
+    // The software doesnt have a way to write to serial, so i use the Raspberry Zero W to send commands
     stdio_usb_init();
     initialize_uart();
-    // stdio_init_all();
-    //stdio_uart_init_full(_UART_ID,_BAUD_RATE,-1,_UART_RX_PIN);
-    while(1){
-        if(uart_is_readable(_UART_ID)){
-            char c=uart_getc(_UART_ID);
-            printf("hi %c\n",c);
-        }
-    }
+ 
     construct_sin_table();
 
     //multi core init stuff
@@ -1023,7 +1008,10 @@ int main()
     // stp2.move(200*4,stepper_driver::CCW);
     while (true) {
         char uart_message[32];
-        if (fgets(uart_message, 32, stdin) != NULL) {
+        if(uart_is_readable(_UART_ID)){
+            uart_read_string(uart_message,32,_UART_ID);
+            printf("Typed: ");
+            printf(uart_message);
             //extract first character from string to determine command type. for now i will use numbers, but i will change this to letters and add possibility of arguments
             if (uart_message[0] >= '0' && uart_message[0] <= '9') { //validate of command is a digit between 0 and 9; will change this to validating individual commands later
                 cmd_packet.command = uart_message[0] - '0'; //convert char to int
@@ -1036,8 +1024,6 @@ int main()
             }
             else
                 printf("Invalid command. Please enter a number.\n");
-        } else {
-            printf("Error reading input.\n");
         }
 
         // test current transforms
