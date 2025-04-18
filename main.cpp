@@ -74,6 +74,61 @@ void uart_read_string(char *buffer, size_t buffer_size, uart_inst_t *uart_instan
     }
     buffer[index++]='\0';
 }
+queue_t comm_queue_01; //queue for communication from core 0 to core 1
+queue_t comm_queue_10;
+struct command_packet{
+    // 0-control mode; 1-new target
+    uint command;
+    float argument;
+};
+// checks uart for new commands
+void uart_check_command(){
+    if(uart_is_readable(_UART_ID)){
+        char uart_message[32];
+        uart_read_string(uart_message,32,_UART_ID); //read uart into buffer until newline
+
+        /// received message can contain multiple commands (begining with a letter)
+        uint index=0;
+        command_packet cmd_packet;
+        while(1){
+            if(uart_message[index]=='M'){ //control mode (voltage,current, velocity, angle)
+                cmd_packet.command = 0;
+                index++;
+                if(uart_message[index]>='0' && uart_message[index]<='9'){ //check if next char is a number
+                    cmd_packet.argument = uart_message[index]-'0'; //conver char to int
+                    index++;
+                    printf("NEW MODE: %f\n",cmd_packet.argument);
+                    queue_add_blocking(&comm_queue_01,&cmd_packet);
+                }
+                else
+                    printf("MODE HAS TO BE A NUMBER!\n");
+            }
+            else if(uart_message[index]=='T'){
+                cmd_packet.command = 1;
+                index++;
+                char argument[30];
+                uint arg_index=0;
+                // char valid_char[20]="0123456789.-";  //maybe this is cleaner and use with strchr
+                while((uart_message[index]>='0' && uart_message[index]<='9') || uart_message[index]=='.' || uart_message[index]=='-'){
+                    argument[arg_index]=uart_message[index];
+                    index++;
+                    arg_index++;                    
+                } 
+                cmd_packet.argument = strtof(argument, NULL);
+                printf("NEW TARGET: %f\n",cmd_packet.argument);
+                queue_add_blocking(&comm_queue_01,&cmd_packet);
+            }
+
+            else if(uart_message[index]=='\0'){  //if null terminator, commands have ended
+                break;
+            }
+            else{
+                printf("COMMAND NOT FOUND: %c\n",uart_message[index]); //if command doesnt exist, cancel everything that comes after
+                break;
+            }
+        }
+    }
+}
 
 //this wraps an angle to the 0 to 2PI range
 float wrap_rad(float angle_rad){
@@ -942,14 +997,6 @@ class stepper_driver{
 //temporary functions for testing
 
 //////////////////////////////////////////////////   MAIN LOOPS  ///////////////////////////////////////////////////////////////////////////////////////////
-
-queue_t comm_queue_01; //queue for communication from core 0 to core 1
-queue_t comm_queue_10;
-struct command_packet{
-    float command;
-    float argument;
-};
-
 void foc_second_core(){
     stdio_usb_init();
     sleep_ms(1000);
@@ -970,8 +1017,14 @@ void foc_second_core(){
         //listen for commands from core 0
         if(!queue_is_empty(&comm_queue_01)){
             queue_remove_blocking(&comm_queue_01,&comm_packet);
-            foc.set_mode(comm_packet.command);
-            foc.set_target(comm_packet.argument);
+            if(comm_packet.command==0){// new mode
+                foc.set_mode(comm_packet.argument);
+                printf("C1: SET MODE: %f\n",comm_packet.argument);
+            }
+            else if(comm_packet.command==1){ //new target
+                foc.set_target(comm_packet.argument);
+                printf("C1: SET TARGET: %f\n",comm_packet.argument);
+            }
         }
         // main foc loop
         foc.loop();
@@ -990,7 +1043,6 @@ int main()
     //multi core init stuff
     queue_init(&comm_queue_01,sizeof(command_packet),1);
     multicore_launch_core1(foc_second_core);
-    command_packet cmd_packet;
 
     //adds limit switch interrupts for steppers
     // add_limit_switch(_LIMIT_SWITCH_RIGHT);
@@ -1007,24 +1059,7 @@ int main()
     // stp1.move_mm(50,stepper_driver::CCW);
     // stp2.move(200*4,stepper_driver::CCW);
     while (true) {
-        char uart_message[32];
-        if(uart_is_readable(_UART_ID)){
-            uart_read_string(uart_message,32,_UART_ID);
-            printf("Typed: ");
-            printf(uart_message);
-            //extract first character from string to determine command type. for now i will use numbers, but i will change this to letters and add possibility of arguments
-            if (uart_message[0] >= '0' && uart_message[0] <= '9') { //validate of command is a digit between 0 and 9; will change this to validating individual commands later
-                cmd_packet.command = uart_message[0] - '0'; //convert char to int
-                if(cmd_packet.command >=0 && cmd_packet.command <=3){ //validate mode
-                    // Convert the string to a float.
-                    cmd_packet.argument = strtof(uart_message+1, NULL);  //convert the rest of the string to a float
-                    printf("NEW VELOCITY: %f\n", cmd_packet.argument);
-                    queue_add_blocking(&comm_queue_01,&cmd_packet); 
-                }
-            }
-            else
-                printf("Invalid command. Please enter a number.\n");
-        }
+        uart_check_command();
 
         // test current transforms
         // for(float test_theta=0;test_theta<_2PI;test_theta+=0.05){
