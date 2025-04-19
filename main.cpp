@@ -77,9 +77,9 @@ void uart_read_string(char *buffer, size_t buffer_size, uart_inst_t *uart_instan
 queue_t comm_queue_01; //queue for communication from core 0 to core 1
 queue_t comm_queue_10;
 struct command_packet{
-    // 0-control mode; 1-new target
+    // 0-control mode; 1-new target; 2-change regulator variable
     uint command;
-    float argument;
+    float arguments[5];
 };
 // checks uart for new commands
 void uart_check_command(){
@@ -91,39 +91,93 @@ void uart_check_command(){
         uint index=0;
         command_packet cmd_packet;
         while(1){
+            //change the multiple if elses to switch (check if switch works with case 'char':)
             if(uart_message[index]=='M'){ //control mode (voltage,current, velocity, angle)
                 cmd_packet.command = 0;
                 index++;
                 if(uart_message[index]>='0' && uart_message[index]<='9'){ //check if next char is a number
-                    cmd_packet.argument = uart_message[index]-'0'; //conver char to int
+                    cmd_packet.arguments[0] = uart_message[index]-'0'; //conver char to int
                     index++;
-                    printf("NEW MODE: %f\n",cmd_packet.argument);
+                    printf("NEW MODE: %f\n",cmd_packet.arguments[0]);
                     queue_add_blocking(&comm_queue_01,&cmd_packet);
                 }
                 else
-                    printf("MODE HAS TO BE A NUMBER!\n");
+                    printf("Error: Mode has to be a number\n");
             }
-            else if(uart_message[index]=='T'){
+            else if(uart_message[index]=='T'){ // new target (float)
                 cmd_packet.command = 1;
                 index++;
                 char argument[30];
                 uint arg_index=0;
-                // char valid_char[20]="0123456789.-";  //maybe this is cleaner and use with strchr
+                // char valid_char[20]="0123456789.-";  //maybe this is cleaner and use with strchr   ALSO maybe make this a function because converting a segment of string to float is done frequently
                 while((uart_message[index]>='0' && uart_message[index]<='9') || uart_message[index]=='.' || uart_message[index]=='-'){
                     argument[arg_index]=uart_message[index];
                     index++;
                     arg_index++;                    
                 } 
-                cmd_packet.argument = strtof(argument, NULL);
-                printf("NEW TARGET: %f\n",cmd_packet.argument);
+                cmd_packet.arguments[0] = strtof(argument, NULL);
+                printf("NEW TARGET: %f\n",cmd_packet.arguments[0]);
+                queue_add_blocking(&comm_queue_01,&cmd_packet);
+            }
+            else if(uart_message[index]=='R'){ // change regulator variable
+                cmd_packet.command=2;
+                index++;
+                
+                //decode regulator
+                if(uart_message[index]=='C'){ //current regulator
+                    cmd_packet.arguments[0]=1; //stands for mode 1 (current)
+                    index++;
+                }
+                else if(uart_message[index]=='V'){ //velocity regulator
+                    cmd_packet.arguments[0]=2; //stands for mode 2 (velocity)
+                    index++;
+                }
+                else if(uart_message[index]=='A'){ //angle regulator
+                    cmd_packet.arguments[0]=3; //stands for mode 3 (angle)
+                    index++;
+                }
+                else{
+                    printf("Error: Regulator not found\n");
+                    break;
+                }
+
+                //decode term
+                if(uart_message[index]=='P'){ //select kp
+                    cmd_packet.arguments[1]=0;
+                    index++;
+                }
+                else if(uart_message[index]=='I'){ //select ki
+                    cmd_packet.arguments[1]=1;
+                    index++;
+                }
+                else{
+                    printf("Regulators only have kp and ki\n");
+                    break;
+                }
+
+                //decode value value
+                char value[30];
+                uint value_index=0;
+                while((uart_message[index]>='0' && uart_message[index]<='9') || uart_message[index]=='.' || uart_message[index]=='-'){
+                    value[value_index]=uart_message[index];
+                    index++;
+                    value_index++;                    
+                } 
+                cmd_packet.arguments[2] = strtof(value, NULL);
+                
+                //send packet
+                printf("REGULATOR: Changed %f regulator's %f term to: %f\n",cmd_packet.arguments[0],cmd_packet.arguments[1],cmd_packet.arguments[2]);
                 queue_add_blocking(&comm_queue_01,&cmd_packet);
             }
 
+            else if(uart_message[index]==' '){ //if whitespace, skip
+                index++;
+            }
             else if(uart_message[index]=='\0'){  //if null terminator, commands have ended
                 break;
             }
             else{
-                printf("COMMAND NOT FOUND: %c\n",uart_message[index]); //if command doesnt exist, cancel everything that comes after
+                printf("Error: Command not found: %c\n",uart_message[index]); //if command doesnt exist, cancel everything that comes after
                 break;
             }
         }
@@ -497,7 +551,6 @@ class PIController{
             previous_time=current_time;
             return output;
         }
-    //private:
         float kp;
         float ki;
         float integral_error;
@@ -1018,12 +1071,44 @@ void foc_second_core(){
         if(!queue_is_empty(&comm_queue_01)){
             queue_remove_blocking(&comm_queue_01,&comm_packet);
             if(comm_packet.command==0){// new mode
-                foc.set_mode(comm_packet.argument);
-                printf("C1: SET MODE: %f\n",comm_packet.argument);
+                foc.set_mode(comm_packet.arguments[0]);
+                printf("C1: SET MODE: %f\n",comm_packet.arguments[0]);
             }
             else if(comm_packet.command==1){ //new target
-                foc.set_target(comm_packet.argument);
-                printf("C1: SET TARGET: %f\n",comm_packet.argument);
+                foc.set_target(comm_packet.arguments[0]);
+                printf("C1: SET TARGET: %f\n",comm_packet.arguments[0]);
+            }
+            else if(comm_packet.command==2){ //change regulator
+                if(comm_packet.arguments[0]==1){ //current
+                    if(comm_packet.arguments[1]==0){
+                        foc.current_controller.kp=comm_packet.arguments[2];
+                        printf("C1: CURRENT NEW KP %f\n",foc.current_controller.kp);
+                    }
+                    else if(comm_packet.arguments[1]==1){
+                        foc.current_controller.ki=comm_packet.arguments[2];
+                        printf("C1: CURRENT NEW KI %f\n",foc.current_controller.ki);
+                    }
+                }
+                else if(comm_packet.arguments[0]==2){ //velocity
+                    if(comm_packet.arguments[1]==0){
+                        foc.vel_controller.kp=comm_packet.arguments[2];
+                        printf("C1: VEL NEW KP %f\n",foc.vel_controller.kp);
+                    }
+                    else if(comm_packet.arguments[1]==1){
+                        foc.vel_controller.ki=comm_packet.arguments[2];
+                        printf("C1: VEL NEW KI %f\n",foc.vel_controller.ki);
+                    }
+                }
+                else if(comm_packet.arguments[0]==3){ //angle
+                    if(comm_packet.arguments[1]==0){
+                        foc.angle_controller.kp=comm_packet.arguments[2];
+                        printf("C1: ANG NEW KP %f\n",foc.angle_controller.kp);
+                    }
+                    else if(comm_packet.arguments[1]==1){
+                        foc.angle_controller.ki=comm_packet.arguments[2];
+                        printf("C1: ANG NEW KI %f\n",foc.angle_controller.ki);
+                    }
+                }
             }
         }
         // main foc loop
