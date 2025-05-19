@@ -517,49 +517,72 @@ class bridge_driver{
 //PID Controller
 class PIController{
     public:
-        PIController(float kp,float ki,float max_output){
+        PIController(float kp,float ki,float max_output,float ramp){
             this->kp=kp;
             this->ki=ki;
-            this->integral_error=0;
+            this->integral_comp=0;
             this->prev_error=0;
             this->max_output=max_output;
+            this->ramp=ramp; //max rate of change
+            this->previous_output=0;
+            this->previous_integral_comp=0;
             previous_time=time_us_64();
         }
         float compute(float error){
             uint64_t current_time=time_us_64();
             float delta_time=(current_time-previous_time)/1000000.0; //i could get rid of this by using the time from the foc loop
+            previous_time=current_time;
+            
             float proportional_comp=kp*error;
-            float integral_comp=integral_error+ki*delta_time*0.5*(error+prev_error);  //magic from simplefoc  ;; Trapezoidal integration?
+
+            integral_comp+=ki*delta_time*0.5*(error+prev_error);  //magic from simplefoc  ;; Trapezoidal integration?
+            prev_error=error;
+            
             //antiwindup
-            if(integral_comp<-max_output)
-                integral_comp=-max_output;
-            else if(integral_comp>max_output)
-                integral_comp=max_output;
+            if(integral_comp<-max_output/2)
+                integral_comp=-max_output/2;
+            else if(integral_comp>max_output/2)
+                integral_comp=max_output/2;
+            
             //calculate output
             float output=proportional_comp + integral_comp;
-            //limit output
+            
+            //ramp
+            float max_delta=ramp*delta_time;
+            if(output-previous_output>max_delta){
+                output=previous_output+max_delta;
+                integral_comp=previous_integral_comp;
+            }
+            else if(previous_output-output>max_delta){
+                output=previous_output-max_delta;
+                integral_comp=previous_integral_comp;
+            }
+            previous_integral_comp=integral_comp;
+
+            //limit output value
             if(output<-max_output)
                 output=-max_output;
             else if(output>max_output)
                 output=max_output;
-            //cant get ramp to work
-            integral_error=integral_comp;
-            prev_error=error;
-            previous_time=current_time;
+            previous_output=output;
+
             return output;
         }
         float kp;
         float ki;
-        float integral_error;
+        float integral_comp;
+        float previous_integral_comp;
         float prev_error;
         uint64_t previous_time;
         float max_output;
+        float ramp;
+        float previous_output;
 };
 
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(70,2600,14),iq_filter(0.01),vel_controller(-0.03,-5,1.4),angle_controller(50,550,25){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(70,2600,14,9999),iq_filter(0.01),vel_controller(-0.03,-5,1.4,90),angle_controller(8,200,25,12){ //old angle ki and kp: 50,550,25,9999
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensors;
@@ -586,7 +609,6 @@ class foc_controller{
 
             el_angle_offset=0;
             old_update_time=0;
-            angle_ramp=6;
             align();
         }
         //find offset for electrical angle
@@ -606,7 +628,6 @@ class foc_controller{
             
             float el_angle_offset_reconstructed=atan2(sum_sin/tests,sum_cos/tests);
             el_angle_offset=wrap_rad(el_angle_offset_reconstructed);
-            setSVPWM(6.9,0,0);
             asoc_encoder->zero_sensor(); //cant remember where this went
             old_angle_target=asoc_encoder->get_absolute_angle_rad();
             sleep_ms(1000);
@@ -625,7 +646,6 @@ class foc_controller{
             if(mode==3)
                 angle_target=manual_angle_target;
             float angle_meas=asoc_encoder->get_absolute_angle_rad();
-            old_angle_target=rampTargetAngle(old_angle_target,angle_target,angle_ramp,delta_time);
             old_angle_target=angle_target;
             float angle_error=old_angle_target-angle_meas;
             velocity_target=angle_controller.compute(angle_error);
@@ -663,7 +683,7 @@ class foc_controller{
 
             //incetinit printarea la consola pentru a ajunge la 250us
             if(cnt%10==0)
-                printf("%f %f %f %f %f\r\n",iq_target,meas_current.q,meas_current.a,meas_current.b,meas_current.c);
+                printf("%f %f %f\r\n",angle_target,angle_meas,angle_controller.integral_comp);
             cnt++;
         }
         //pid target variables
@@ -674,7 +694,6 @@ class foc_controller{
 
         float old_angle_target; //for angle rate_limit
         float old_update_time; //for calculating dt;
-        float angle_ramp;  //in rad/sec
 
         ///// FUNCTIONS FOR MODE SELECTION AND TARGETS
         int mode;
@@ -800,16 +819,6 @@ class foc_controller{
             return wrap_rad(motor_pole_pairs*asoc_encoder->get_angle_rad()-el_angle_offset);
         }
         float max_uq_reference;
-        float rampTargetAngle(float current_angle, float end_angle,float max_rate,float delta_time){
-            float delta_angle = end_angle - current_angle;
-            float maxDelta = max_rate * delta_time;
-            if (delta_angle > maxDelta) {
-                delta_angle = maxDelta;
-            } else if (delta_angle < -maxDelta) {
-                delta_angle = -maxDelta;
-            }
-            return current_angle + delta_angle;
-        }
 
         //velocity PID
         PIController current_controller;
