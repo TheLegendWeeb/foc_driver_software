@@ -8,7 +8,6 @@
 #include "hardware/uart.h"
 
 #include <cmath>
-#include <cstring>
 
 //current sense pins
 #define _CURRENT_SENSE_PIN_A 26
@@ -26,22 +25,22 @@
 #define _PIN_MOSI 19
 
 //driver pins
+#define _DRIVER_ENABLE_PIN 12
 #define _PWM_A_PIN 13
 #define _PWM_B_PIN 14
 #define _PWM_C_PIN 15
-#define _DRIVER_ENABLE_PIN 12
 
 //stepper pins
-#define _STEP_PINA 1
 #define _DIR_PINA 0
-#define _STEP_PINB 3
+#define _STEP_PINA 1
 #define _DIR_PINB 2
+#define _STEP_PINB 3
 
 //limit switch pins
 #define _LIMIT_SWITCH_RIGHT 4
 #define _LIMIT_SWITCH_LEFT 5
 
-//Util values defs
+//Useful constants
 #define _2PI        6.2831853072
 #define _PIover3    1.0471975512
 #define _SQRT3      1.7320508075
@@ -75,10 +74,9 @@ void uart_read_string(char *buffer, size_t buffer_size, uart_inst_t *uart_instan
     buffer[index++]='\0';
 }
 queue_t comm_queue_01; //queue for communication from core 0 to core 1
-queue_t comm_queue_10;
+queue_t comm_queue_10; //queue for communication from core 1 to core 0
 struct command_packet{
-    // 0-control mode; 1-new target; 2-change regulator variable
-    uint command;
+    uint command; // 0-control mode; 1-new target; 2-change regulator variable
     float arguments[5];
 };
 // checks uart for new commands
@@ -234,7 +232,7 @@ float cos_aprox(float angle_rad){
 
 
 
-//class for currents (contains each phase and stuff)
+//current class. Contains a,b,c,d,q and the associated methods
 // how do i make this efficient. Maybe an update function? That could open opportunities for errors
 class motor_current{
     public:
@@ -264,9 +262,9 @@ class motor_current{
 };
 
 //class for the current sensor
-class current_sensor{
+class current_sensors{
     public:
-        current_sensor(int cs_phase_a_pin, int cs_phase_b_pin, int cs_phase_c_pin){
+        current_sensors(int cs_phase_a_pin, int cs_phase_b_pin, int cs_phase_c_pin){
             pinA=cs_phase_a_pin;
             pinB=cs_phase_b_pin;
             pinC=cs_phase_c_pin;
@@ -300,7 +298,6 @@ class current_sensor{
         float center_offset_voltage_b=0;
         float center_offset_voltage_c=0;
 
-
         float read_raw_voltage(int channel){
             adc_select_input(channel);
             float voltage=adc_read();
@@ -322,7 +319,7 @@ class current_sensor{
         }
 };
 
-// LP filter
+// LP filter (exponential moving average)
 class LPF{
     public:
         LPF(float alpha){
@@ -335,7 +332,7 @@ class LPF{
             return output;
         }
     private:
-        float alpha;
+        float alpha; //weight
         float prev_output;
 };
 
@@ -562,15 +559,15 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensor* associated_current_sensor, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(70,2600,14),iq_filter(0.01),vel_controller(-0.03,-5,1.3),angle_controller(50,550,25){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(70,2600,14),iq_filter(0.01),vel_controller(-0.03,-5,1.4),angle_controller(50,550,25){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
-            this->asoc_cs=associated_current_sensor;
+            this->asoc_cs=associated_current_sensors;
 
             this->motor_pole_pairs=motor_pole_pairs;
             this->current_limit=current_limit;
             this->power_supply_voltage=power_supply_voltage;
-            max_reference=power_supply_voltage/M_SQRT3;
+            max_uq_reference=power_supply_voltage/M_SQRT3;
             
             //current limiting; not done
             this->motor_phase_resistance=phase_resistance;
@@ -609,10 +606,12 @@ class foc_controller{
             
             float el_angle_offset_reconstructed=atan2(sum_sin/tests,sum_cos/tests);
             el_angle_offset=wrap_rad(el_angle_offset_reconstructed);
-            asoc_encoder->zero_sensor();
+            setSVPWM(6.9,0,0);
+            asoc_encoder->zero_sensor(); //cant remember where this went
             old_angle_target=asoc_encoder->get_absolute_angle_rad();
-            setSVPWM(0,0,0);
+            sleep_ms(1000);
             asoc_driver->disable();
+            setSVPWM(0,0,0);
         }
         //foc loop
         uint64_t cnt=0;
@@ -652,20 +651,20 @@ class foc_controller{
             if(mode==0)
                 uq=manual_uq;
             //avoid over-modulation
-            if(uq>max_reference && uq>0){
-                uq=max_reference;
+            if(uq>max_uq_reference && uq>0){
+                uq=max_uq_reference;
             }
-            else if(uq<-max_reference && uq<0){
-                uq=-max_reference;
+            else if(uq<-max_uq_reference && uq<0){
+                uq=-max_uq_reference;
             }
             
             //send pwm to motor
             setSVPWM(uq,0,wrap_rad(electrical_angle+M_PI_2));
 
             //incetinit printarea la consola pentru a ajunge la 250us
-            // if(cnt%10==0)
-            //     printf("%f %f %f %f\r\n",velocity_target,velocity_meas,uq,delta_time*1000000.0);
-            // cnt++;
+            if(cnt%10==0)
+                printf("%f %f %f %f %f\r\n",iq_target,meas_current.q,meas_current.a,meas_current.b,meas_current.c);
+            cnt++;
         }
         //pid target variables
         float uq;
@@ -789,7 +788,7 @@ class foc_controller{
         };
         bridge_driver* asoc_driver;
         encoder* asoc_encoder;
-        current_sensor* asoc_cs;
+        current_sensors* asoc_cs;
     // private:
         uint power_supply_voltage;
         float motor_phase_resistance;
@@ -800,7 +799,7 @@ class foc_controller{
         float get_electrical_angle(){
             return wrap_rad(motor_pole_pairs*asoc_encoder->get_angle_rad()-el_angle_offset);
         }
-        float max_reference;
+        float max_uq_reference;
         float rampTargetAngle(float current_angle, float end_angle,float max_rate,float delta_time){
             float delta_angle = end_angle - current_angle;
             float maxDelta = max_rate * delta_time;
@@ -1054,15 +1053,13 @@ void foc_second_core(){
     stdio_usb_init();
     sleep_ms(1000);
     // foc objects initialization
-    current_sensor cs(_CURRENT_SENSE_PIN_A,_CURRENT_SENSE_PIN_B,_CURRENT_SENSE_PIN_C);
+    current_sensors cs(_CURRENT_SENSE_PIN_A,_CURRENT_SENSE_PIN_B,_CURRENT_SENSE_PIN_C);
     bridge_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
     encoder encoder(spi0,_PIN_SCK,_PIN_CS,_PIN_MISO,_PIN_MOSI,true);
     foc_controller foc(&drv,&encoder, &cs,7,24,15);
 
     foc.set_mode(3); 
     foc.set_angle(0);
-    foc.set_mode(2);
-    foc.set_target(_2PI);
     foc.asoc_driver->enable();
     
     command_packet comm_packet;
