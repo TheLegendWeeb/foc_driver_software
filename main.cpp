@@ -766,11 +766,10 @@ class foc_controller{
         }
         // sets the pwm from a voltage reference
         void setSVPWM(float Vref, float el_angle){ //implemented according to https://www.e3s-conferences.org/articles/e3sconf/pdf/2021/64/e3sconf_suse2021_01059.pdf, but modified the m and the formulas for correct scaling
-            //el_angle has to be clamped between 0 and 2pi
-            el_angle=wrap_rad(el_angle);
+            el_angle=wrap_rad(el_angle); //el_angle has to be clamped between 0 and 2pi
             int sector = int(el_angle/_PIover3)+1;
-
-            float m=_SQRT3*(Vref/(float)power_supply_voltage); //modulation index
+            //calculate times
+            float m=_SQRT3*(fabs(Vref)/(float)power_supply_voltage); //modulation index
             float T1=m*sin_aprox(sector*_PIover3-el_angle);
             float T2=m*sin_aprox(el_angle-(sector-1)*_PIover3);
             float T0=1.0-T1-T2;
@@ -814,7 +813,11 @@ class foc_controller{
                     dC=T1+T0/2;
                     break;
             }
-            printf("%d %f %f %f %f %f %f %f %f\n",sector,dA,dB,dC,T1,T2,T0,uq,m);
+            if(Vref<0){
+                dA=1.0-dA;
+                dB=1.0-dB;
+                dC=1.0-dC;
+            }
             asoc_driver->set_pwm_duty(dA,dB,dC);
         }
         enum direction{
