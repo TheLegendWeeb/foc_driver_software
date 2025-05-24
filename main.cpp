@@ -181,6 +181,18 @@ void uart_check_command(){
         }
     }
 }
+//structure used for monitoring variables inside second core
+volatile struct monitoring_data{
+    float currents_abc[3]; // a,b,c
+    float delta_time;
+    float angle[2]; //target, meas
+    float velocity[2]; //target, meas
+    float iq[2]; // target, meas
+    float uq;
+    float el_angle;
+    //pid values
+
+} shared_monitoring_data;
 
 //this wraps an angle to the 0 to 2PI range
 float wrap_rad(float angle_rad){
@@ -616,7 +628,7 @@ class foc_controller{
             float sum_sin=0;
             float sum_cos=0;
             asoc_driver->enable();
-            setSVPWM(6.9,0,M_PI); //move motor to 180 deg (pi rad)
+            setSVPWM(6.9,M_PI); //move motor to 180 deg (pi rad)
             sleep_ms(1000);
             for(int i=0;i<tests;i++){
                 float el_ang=get_electrical_angle();
@@ -631,7 +643,7 @@ class foc_controller{
             old_angle_target=asoc_encoder->get_unwrapped_angle_rad();
             sleep_ms(1000);
             asoc_driver->disable();
-            setSVPWM(0,0,0);
+            setSVPWM(0,0);
         }
         //foc loop
         uint64_t cnt=0;
@@ -678,12 +690,21 @@ class foc_controller{
             }
             
             //send pwm to motor
-            setSVPWM(uq,0,wrap_rad(electrical_angle+M_PI_2));
+            setSVPWM(uq,electrical_angle+M_PI_2);
 
-            //incetinit printarea la consola pentru a ajunge la 250us
-            if(cnt%10==0)
-                printf("%f %f %f\r\n",angle_target,angle_meas,angle_controller.integral_comp);
-            cnt++;
+            //update monitored values (maybe use a mask to skip unwanted stuff)
+            shared_monitoring_data.currents_abc[0]=meas_current.a;
+            shared_monitoring_data.currents_abc[1]=meas_current.b;
+            shared_monitoring_data.currents_abc[2]=meas_current.c;
+            shared_monitoring_data.delta_time=delta_time;
+            shared_monitoring_data.angle[0]=angle_target;
+            shared_monitoring_data.angle[1]=angle_meas;
+            shared_monitoring_data.velocity[0]=velocity_target;
+            shared_monitoring_data.velocity[1]=velocity_meas;
+            shared_monitoring_data.iq[0]=iq_target;
+            shared_monitoring_data.iq[1]=meas_current.q;
+            shared_monitoring_data.uq=uq;
+            shared_monitoring_data.el_angle=wrap_rad(electrical_angle+M_PI_2);
         }
         //pid target variables
         float uq;
@@ -746,20 +767,18 @@ class foc_controller{
 
 
 
-        // sets the pwm from a uq reference
-        void setSVPWM(float Uq, float Ud, float target_el_angle){ //implemented according to https://www.youtube.com/watch?v=QMSWUMEAejg
+        // sets the pwm from a voltage reference
+        void setSVPWM(float Vref, float target_el_angle){ //implemented according to https://www.youtube.com/watch?v=QMSWUMEAejg
             //el_angle has to be clamped between 0 and 2pi
             target_el_angle=wrap_rad(target_el_angle);
             int sector = int(target_el_angle/_PIover3)+1;
 
-            float T1,T2,T0;
-            float Uq_scaled = (Uq/(float)power_supply_voltage); //scales uq to [0,1]
-            //lookup
-            T1=_SQRT3*sin_aprox(sector*_PIover3-target_el_angle)*Uq_scaled;
-            T2=_SQRT3*sin_aprox(target_el_angle-(sector-1.0)*_PIover3)*Uq_scaled;
-            T0=1-T1-T2;
+            float m=Vref/((2.0/3.0)*(float)power_supply_voltage); //modulation index
+            float T1=((2*m)/_SQRT3) *sinf(sector*_PIover3-target_el_angle);
+            float T2=((2*m)/_SQRT3) *sinf(target_el_angle-(sector-1.0)*_PIover3);
+            float T0=1-T1-T2;
             // translate duty cycles to sectors
-            float dA,dB,dC; //duty cycles for each phase needed for bridge;
+            float dA,dB,dC; //duty cycles for each phase;
             switch(sector){
                 case 1:
                     //sector 1
@@ -798,6 +817,7 @@ class foc_controller{
                     dC=T1+T0/2;
                     break;
             }
+            printf("%d %f %f %f %f %f %f %f %f\n",sector,dA,dB,dC,T1,T2,T0,uq,m);
             asoc_driver->set_pwm_duty(dA,dB,dC);
         }
         enum direction{
@@ -1150,7 +1170,7 @@ int main()
     // stp2.move(200*4,stepper_driver::CCW);
     while (true) {
         uart_check_command();
-
+        //printf("%f %f %f\n",shared_monitoring_data.el_angle,shared_monitoring_data.angle[1],shared_monitoring_data.uq);
         // test current transforms
         // for(float test_theta=0;test_theta<_2PI;test_theta+=0.05){
         //     test_c.a=sin(test_theta);
