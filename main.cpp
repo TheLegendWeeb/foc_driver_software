@@ -813,7 +813,7 @@ class foc_controller{
                     dC=T1+T0/2;
                     break;
             }
-            if(Vref<0){
+            if(Vref<0){ //reverse duty cycle if ref is negative
                 dA=1.0-dA;
                 dB=1.0-dB;
                 dC=1.0-dC;
