@@ -764,19 +764,16 @@ class foc_controller{
                     break;
             }
         }
-
-
-
         // sets the pwm from a voltage reference
-        void setSVPWM(float Vref, float target_el_angle){ //implemented according to https://www.youtube.com/watch?v=QMSWUMEAejg
+        void setSVPWM(float Vref, float el_angle){ //implemented according to https://www.e3s-conferences.org/articles/e3sconf/pdf/2021/64/e3sconf_suse2021_01059.pdf, but modified the m and the formulas for correct scaling
             //el_angle has to be clamped between 0 and 2pi
-            target_el_angle=wrap_rad(target_el_angle);
-            int sector = int(target_el_angle/_PIover3)+1;
+            el_angle=wrap_rad(el_angle);
+            int sector = int(el_angle/_PIover3)+1;
 
-            float m=Vref/((2.0/3.0)*(float)power_supply_voltage); //modulation index
-            float T1=((2*m)/_SQRT3) *sinf(sector*_PIover3-target_el_angle);
-            float T2=((2*m)/_SQRT3) *sinf(target_el_angle-(sector-1.0)*_PIover3);
-            float T0=1-T1-T2;
+            float m=_SQRT3*(Vref/(float)power_supply_voltage); //modulation index
+            float T1=m*sin_aprox(sector*_PIover3-el_angle);
+            float T2=m*sin_aprox(el_angle-(sector-1)*_PIover3);
+            float T0=1.0-T1-T2;
             // translate duty cycles to sectors
             float dA,dB,dC; //duty cycles for each phase;
             switch(sector){
