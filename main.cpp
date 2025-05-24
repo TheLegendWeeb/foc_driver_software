@@ -638,7 +638,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(50,1200,14,9999),iq_filter(0.01),vel_controller(-0.05,-0.3,1.4,90),angle_controller(4,40,25,12){ //old angle ki and kp: 50,550,25,9999
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(50,1200,14,9999),iq_filter(0.01),vel_controller(-0.05,-0.3,1.4,90),angle_controller(8,1,45,5){ //old angle ki and kp: 50,550,25,9999
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensors;
