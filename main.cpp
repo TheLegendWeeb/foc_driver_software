@@ -8,7 +8,7 @@
 #include "hardware/uart.h"
 
 #include <cmath>
-
+////////////////////////////////////////////////////////PIN DEFINITIONS//////////////////////////////////////////////////
 //current sense pins
 #define _CURRENT_SENSE_PIN_A 26
 #define _CURRENT_SENSE_PIN_B 27
@@ -54,6 +54,55 @@
 #define _UART_TX_PIN 8
 #define _UART_RX_PIN 9
 
+////////////////////////////////////////////////////////////////////MONITORING SEGMENT//////////////////////////////
+
+uint32_t monitoring_mask=0; // not monitoring anything by default
+// mask for monitoring variables
+#define BIT(n) (1 << (n))  //macro pentru selectat biti
+#define MASK_CURRENTS_A  BIT(0) // 1 << 0
+#define MASK_CURRENTS_B  BIT(1) // 1 << 1
+#define MASK_CURRENTS_C  BIT(2) // 1 << 2
+#define MASK_DELTA_TIME  BIT(3)
+#define MASK_ANGLE_T     BIT(4)
+#define MASK_ANGLE_M     BIT(5) 
+#define MASK_VELOCITY_T  BIT(6)
+#define MASK_VELOCITY_M  BIT(7) 
+#define MASK_IQ_T        BIT(8) 
+#define MASK_IQ_M        BIT(9) 
+#define MASK_UQ          BIT(10) 
+#define MASK_EL_ANGLE    BIT(11) 
+//structure used for monitoring variables inside second core
+volatile struct monitoring_data{
+    float currents_abc[3]; // a,b,c
+    float delta_time;
+    float angle[2]; //target, meas
+    float velocity[2]; //target, meas
+    float iq[2]; // target, meas
+    float uq;
+    float el_angle;
+    //pid values
+
+} shared_monitoring_data;
+const volatile float* values[] = {  //array used to iterate through the possible variables
+    &shared_monitoring_data.currents_abc[0], &shared_monitoring_data.currents_abc[1], &shared_monitoring_data.currents_abc[2], //currents
+    &shared_monitoring_data.delta_time, 
+    &shared_monitoring_data.angle[0], &shared_monitoring_data.angle[1], // angle
+    &shared_monitoring_data.velocity[0], &shared_monitoring_data.velocity[1], //velocity
+    &shared_monitoring_data.iq[0], &shared_monitoring_data.iq[1], //iq
+    &shared_monitoring_data.uq,
+    &shared_monitoring_data.el_angle 
+};
+void handle_monitoring(uint32_t mask){
+    for(int i=0;i<12;i++){
+        if(mask&(1<<i)){
+            printf("%f ",*values[i]);
+        }
+    }
+    printf("\n");
+}
+
+//////////////////////////////////////////////////////////UART COMMS SEGENT//////////////////////////////
+
 //this initializes the UART comms
 void initialize_uart(){
     uart_init(_UART_ID, _BAUD_RATE);
@@ -96,11 +145,11 @@ void uart_check_command(){
                 if(uart_message[index]>='0' && uart_message[index]<='9'){ //check if next char is a number
                     cmd_packet.arguments[0] = uart_message[index]-'0'; //conver char to int
                     index++;
-                    printf("NEW MODE: %f\n",cmd_packet.arguments[0]);
+                    // printf("NEW MODE: %f\n",cmd_packet.arguments[0]);
                     queue_add_blocking(&comm_queue_01,&cmd_packet);
                 }
-                else
-                    printf("Error: Mode has to be a number\n");
+                // else
+                //     printf("Error: Mode has to be a number\n");
             }
             else if(uart_message[index]=='T'){ // new target (float)
                 cmd_packet.command = 1;
@@ -114,7 +163,7 @@ void uart_check_command(){
                     arg_index++;                    
                 } 
                 cmd_packet.arguments[0] = strtof(argument, NULL);
-                printf("NEW TARGET: %f\n",cmd_packet.arguments[0]);
+                // printf("NEW TARGET: %f\n",cmd_packet.arguments[0]);
                 queue_add_blocking(&comm_queue_01,&cmd_packet);
             }
             else if(uart_message[index]=='R'){ // change regulator variable
@@ -135,7 +184,7 @@ void uart_check_command(){
                     index++;
                 }
                 else{
-                    printf("Error: Regulator not found\n");
+                    // printf("Error: Regulator not found\n");
                     break;
                 }
 
@@ -149,7 +198,7 @@ void uart_check_command(){
                     index++;
                 }
                 else{
-                    printf("Regulators only have kp and ki\n");
+                    // printf("Regulators only have kp and ki\n");
                     break;
                 }
 
@@ -164,10 +213,16 @@ void uart_check_command(){
                 cmd_packet.arguments[2] = strtof(value, NULL);
                 
                 //send packet
-                printf("REGULATOR: Changed %f regulator's %f term to: %f\n",cmd_packet.arguments[0],cmd_packet.arguments[1],cmd_packet.arguments[2]);
+                //printf("REGULATOR: Changed %f regulator's %f term to: %f\n",cmd_packet.arguments[0],cmd_packet.arguments[1],cmd_packet.arguments[2]);
                 queue_add_blocking(&comm_queue_01,&cmd_packet);
             }
-
+            else if(uart_message[index]=='P'){ //monitoring command (print) takes a binary 32bit number
+                index++;
+                monitoring_mask=0;
+                while(uart_message[index]=='1' || uart_message[index]=='0'){
+                    monitoring_mask=(monitoring_mask<<1)|(uart_message[index++]-'0');
+                }
+            }
             else if(uart_message[index]==' '){ //if whitespace, skip
                 index++;
             }
@@ -175,24 +230,14 @@ void uart_check_command(){
                 break;
             }
             else{
-                printf("Error: Command not found: %c\n",uart_message[index]); //if command doesnt exist, cancel everything that comes after
+                //printf("Error: Command not found: %c\n",uart_message[index]); //if command doesnt exist, cancel everything that comes after
                 break;
             }
         }
     }
 }
-//structure used for monitoring variables inside second core
-volatile struct monitoring_data{
-    float currents_abc[3]; // a,b,c
-    float delta_time;
-    float angle[2]; //target, meas
-    float velocity[2]; //target, meas
-    float iq[2]; // target, meas
-    float uq;
-    float el_angle;
-    //pid values
 
-} shared_monitoring_data;
+///////////////////////////////////////////////////////////////////////////
 
 //this wraps an angle to the 0 to 2PI range
 float wrap_rad(float angle_rad){
@@ -646,7 +691,6 @@ class foc_controller{
             setSVPWM(0,0);
         }
         //foc loop
-        uint64_t cnt=0;
         void loop(){
             //calculate dt
             uint64_t current_time=time_us_64();
@@ -692,7 +736,8 @@ class foc_controller{
             //send pwm to motor
             setSVPWM(uq,electrical_angle+M_PI_2);
 
-            //update monitored values (maybe use a mask to skip unwanted stuff)
+            //update monitored values
+            uint64_t st_time=time_us_64();
             shared_monitoring_data.currents_abc[0]=meas_current.a;
             shared_monitoring_data.currents_abc[1]=meas_current.b;
             shared_monitoring_data.currents_abc[2]=meas_current.c;
@@ -704,7 +749,7 @@ class foc_controller{
             shared_monitoring_data.iq[0]=iq_target;
             shared_monitoring_data.iq[1]=meas_current.q;
             shared_monitoring_data.uq=uq;
-            shared_monitoring_data.el_angle=wrap_rad(electrical_angle+M_PI_2);
+            shared_monitoring_data.el_angle=electrical_angle;
         }
         //pid target variables
         float uq;
@@ -1097,41 +1142,41 @@ void foc_second_core(){
             queue_remove_blocking(&comm_queue_01,&comm_packet);
             if(comm_packet.command==0){// new mode
                 foc.set_mode(comm_packet.arguments[0]);
-                printf("C1: SET MODE: %f\n",comm_packet.arguments[0]);
+                // printf("C1: SET MODE: %f\n",comm_packet.arguments[0]);
             }
             else if(comm_packet.command==1){ //new target
                 foc.set_target(comm_packet.arguments[0]);
-                printf("C1: SET TARGET: %f\n",comm_packet.arguments[0]);
+                // printf("C1: SET TARGET: %f\n",comm_packet.arguments[0]);
             }
             else if(comm_packet.command==2){ //change regulator
                 if(comm_packet.arguments[0]==1){ //current
                     if(comm_packet.arguments[1]==0){
                         foc.current_controller.kp=comm_packet.arguments[2];
-                        printf("C1: CURRENT NEW KP %f\n",foc.current_controller.kp);
+                        // printf("C1: CURRENT NEW KP %f\n",foc.current_controller.kp);
                     }
                     else if(comm_packet.arguments[1]==1){
                         foc.current_controller.ki=comm_packet.arguments[2];
-                        printf("C1: CURRENT NEW KI %f\n",foc.current_controller.ki);
+                        // printf("C1: CURRENT NEW KI %f\n",foc.current_controller.ki);
                     }
                 }
                 else if(comm_packet.arguments[0]==2){ //velocity
                     if(comm_packet.arguments[1]==0){
                         foc.vel_controller.kp=comm_packet.arguments[2];
-                        printf("C1: VEL NEW KP %f\n",foc.vel_controller.kp);
+                        // printf("C1: VEL NEW KP %f\n",foc.vel_controller.kp);
                     }
                     else if(comm_packet.arguments[1]==1){
                         foc.vel_controller.ki=comm_packet.arguments[2];
-                        printf("C1: VEL NEW KI %f\n",foc.vel_controller.ki);
+                        // printf("C1: VEL NEW KI %f\n",foc.vel_controller.ki);
                     }
                 }
                 else if(comm_packet.arguments[0]==3){ //angle
                     if(comm_packet.arguments[1]==0){
                         foc.angle_controller.kp=comm_packet.arguments[2];
-                        printf("C1: ANG NEW KP %f\n",foc.angle_controller.kp);
+                        // printf("C1: ANG NEW KP %f\n",foc.angle_controller.kp);
                     }
                     else if(comm_packet.arguments[1]==1){
                         foc.angle_controller.ki=comm_packet.arguments[2];
-                        printf("C1: ANG NEW KI %f\n",foc.angle_controller.ki);
+                        // printf("C1: ANG NEW KI %f\n",foc.angle_controller.ki);
                     }
                 }
             }
@@ -1170,7 +1215,8 @@ int main()
     // stp2.move(200*4,stepper_driver::CCW);
     while (true) {
         uart_check_command();
-        //printf("%f %f %f\n",shared_monitoring_data.el_angle,shared_monitoring_data.angle[1],shared_monitoring_data.uq);
+        handle_monitoring(monitoring_mask); //monitoring segment
+
         // test current transforms
         // for(float test_theta=0;test_theta<_2PI;test_theta+=0.05){
         //     test_c.a=sin(test_theta);

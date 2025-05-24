@@ -39,7 +39,8 @@
     "files.associations": {
         "cstdint": "cpp",
         "random": "cpp",
-        "cstring": "cpp"
+        "cstring": "cpp",
+        "cmath": "cpp"
     },
     "C_Cpp.errorSquiggles": "disabled"
 }
