@@ -638,7 +638,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(70,2600,14,9999),iq_filter(0.01),vel_controller(-0.03,-5,1.4,90),angle_controller(8,200,25,12){ //old angle ki and kp: 50,550,25,9999
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(50,1200,14,9999),iq_filter(0.01),vel_controller(-0.05,-0.3,1.4,90),angle_controller(4,40,25,12){ //old angle ki and kp: 50,550,25,9999
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensors;
@@ -1213,9 +1213,40 @@ int main()
     // stp2.set_dir(stepper_driver::CW);
     // stp1.move_mm(50,stepper_driver::CCW);
     // stp2.move(200*4,stepper_driver::CCW);
+
+    //tuning
+    command_packet m_cmd_packet;
+    m_cmd_packet.command = 0;
+    m_cmd_packet.arguments[0]=3; //current
+    queue_add_blocking(&comm_queue_01,&m_cmd_packet);
+    
+    uint64_t stp_tim=time_us_64()+500000;
+    int phs=0;
+    m_cmd_packet.command=1;
     while (true) {
         uart_check_command();
         handle_monitoring(monitoring_mask); //monitoring segment
+
+        if(time_us_64()>stp_tim){
+            if(phs==0){
+                m_cmd_packet.arguments[0]=5;
+                phs++;
+            } 
+            else if(phs==1){
+                m_cmd_packet.arguments[0]=0;
+                phs++;
+            }
+            else if(phs==2){
+                m_cmd_packet.arguments[0]=-5;
+                phs++;
+            }
+            else if(phs==3){
+                m_cmd_packet.arguments[0]=0;
+                phs=0;
+            }
+            queue_add_blocking(&comm_queue_01,&m_cmd_packet);
+            stp_tim=time_us_64()+3500000;
+        }
 
         // test current transforms
         // for(float test_theta=0;test_theta<_2PI;test_theta+=0.05){
