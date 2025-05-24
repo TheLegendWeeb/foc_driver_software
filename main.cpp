@@ -253,7 +253,6 @@ class motor_current{
         // park transform
         void update_dq_values(float el_angle){
             update_ab_values();
-            //make this use a lookup table
             float cos_theta=cos_aprox(el_angle);
             float sin_theta=sin_aprox(el_angle);
             d=alpha*cos_theta+beta*sin_theta;
@@ -419,18 +418,18 @@ class encoder{
             return vel_filter.compute(raw_velocity);
         }
         
-        //returns absolute angle as an int
-        int32_t get_absolute_angle(){
+        //returns unwrapped angle as an int
+        int32_t get_unwrapped_angle(){
             get_angle(); //we just update the function
             return total_rotations;
         }
-        //returns absolute angle as degrees
-        float get_absolute_angle_deg(){
-            return (float)get_absolute_angle()/16384.0*360.0;
+        //returns unwrapped angle as degrees
+        float get_unwrapped_angle_deg(){
+            return (float)get_unwrapped_angle()/16384.0*360.0;
         }
-        //returns absolute angle as radians
-        float get_absolute_angle_rad(){
-            return (float)get_absolute_angle()/16384.0*_2PI;
+        //returns unwrapped angle as radians
+        float get_unwrapped_angle_rad(){
+            return (float)get_unwrapped_angle()/16384.0*_2PI;
         }
         
         private:
@@ -629,7 +628,7 @@ class foc_controller{
             float el_angle_offset_reconstructed=atan2(sum_sin/tests,sum_cos/tests);
             el_angle_offset=wrap_rad(el_angle_offset_reconstructed);
             asoc_encoder->zero_sensor(); //cant remember where this went
-            old_angle_target=asoc_encoder->get_absolute_angle_rad();
+            old_angle_target=asoc_encoder->get_unwrapped_angle_rad();
             sleep_ms(1000);
             asoc_driver->disable();
             setSVPWM(0,0,0);
@@ -645,7 +644,7 @@ class foc_controller{
             //angle controller (this jumps for angle_target=0; also it only sometimes jumps)
             if(mode==3)
                 angle_target=manual_angle_target;
-            float angle_meas=asoc_encoder->get_absolute_angle_rad();
+            float angle_meas=asoc_encoder->get_unwrapped_angle_rad();
             old_angle_target=angle_target;
             float angle_error=old_angle_target-angle_meas;
             velocity_target=angle_controller.compute(angle_error);
