@@ -69,8 +69,7 @@ uint32_t monitoring_mask=0; // not monitoring anything by default
 #define MASK_IQ_T        BIT(8) 
 #define MASK_IQ_M        BIT(9) 
 #define MASK_UQ          BIT(10) 
-#define MASK_EL_ANGLE    BIT(11) 
-#define MASK_PID_C_I    BIT(12) 
+#define MASK_EL_ANGLE    BIT(11)
 //structure used for monitoring variables inside second core
 volatile struct monitoring_data{
     float currents_abc[3]; // a,b,c
@@ -81,7 +80,6 @@ volatile struct monitoring_data{
     float uq;
     float el_angle;
     //pid values
-    float pid_accum[3];
 } shared_monitoring_data;
 const volatile float* values[] = {  //array used to iterate through the possible variables
     &shared_monitoring_data.currents_abc[0], &shared_monitoring_data.currents_abc[1], &shared_monitoring_data.currents_abc[2], //currents
@@ -91,10 +89,9 @@ const volatile float* values[] = {  //array used to iterate through the possible
     &shared_monitoring_data.iq[0], &shared_monitoring_data.iq[1], //iq
     &shared_monitoring_data.uq,
     &shared_monitoring_data.el_angle,
-    &shared_monitoring_data.pid_accum[0]
 };
 void handle_monitoring(uint32_t mask){
-    for(int i=0;i<13;i++){
+    for(int i=0;i<12;i++){
         if(mask&(1<<i)){
             printf("%f ",*values[i]);
         }
@@ -753,7 +750,6 @@ class foc_controller{
             shared_monitoring_data.iq[1]=meas_current.q;
             shared_monitoring_data.uq=uq;
             shared_monitoring_data.el_angle=electrical_angle;
-            shared_monitoring_data.pid_accum[0]=current_controller.integral_comp;
         }
         //pid target variables
         float uq;
@@ -1215,44 +1211,44 @@ int main()
     
     stp1.set_dir(stepper_driver::CW);
     stp2.set_dir(stepper_driver::CW);
-    stp1.move_mm(50,stepper_driver::CCW);
-    stp2.move(200*4,stepper_driver::CCW);
+    //stp1.move_mm(50,stepper_driver::CCW);
+    //stp2.move(200*4,stepper_driver::CCW);
     
     //tuning
-    command_packet m_cmd_packet;
-    m_cmd_packet.command = 0;
-    m_cmd_packet.arguments[0]=3; //mode
-    queue_add_blocking(&comm_queue_01,&m_cmd_packet);
+    // command_packet m_cmd_packet;
+    // m_cmd_packet.command = 0;
+    // m_cmd_packet.arguments[0]=3; //mode
+    // queue_add_blocking(&comm_queue_01,&m_cmd_packet);
     
-    uint64_t stp_tim=time_us_64()+500000;
-    int phs=0;
-    m_cmd_packet.command=1;
-    monitoring_mask=0b0000001110000;
+    // uint64_t stp_tim=time_us_64()+500000;
+    // int phs=0;
+    // m_cmd_packet.command=1;
+    // monitoring_mask=0b0000001110000;
     while (true) {
         uart_check_command();
         handle_monitoring(monitoring_mask); //monitoring segment
 
         //tune setup
-        if(time_us_64()>stp_tim){
-            if(phs==0){
-                m_cmd_packet.arguments[0]=5;
-                phs++;
-            } 
-            else if(phs==1){
-                m_cmd_packet.arguments[0]=0;
-                phs++;
-            }
-            else if(phs==2){
-                m_cmd_packet.arguments[0]=-5;
-                phs++;
-            }
-            else if(phs==3){
-                m_cmd_packet.arguments[0]=0;
-                phs=0;
-            }
-            queue_add_blocking(&comm_queue_01,&m_cmd_packet);
-            stp_tim=time_us_64()+3500000;
-        }
+        // if(time_us_64()>stp_tim){
+        //     if(phs==0){
+        //         m_cmd_packet.arguments[0]=5;
+        //         phs++;
+        //     } 
+        //     else if(phs==1){
+        //         m_cmd_packet.arguments[0]=0;
+        //         phs++;
+        //     }
+        //     else if(phs==2){
+        //         m_cmd_packet.arguments[0]=-5;
+        //         phs++;
+        //     }
+        //     else if(phs==3){
+        //         m_cmd_packet.arguments[0]=0;
+        //         phs=0;
+        //     }
+        //     queue_add_blocking(&comm_queue_01,&m_cmd_packet);
+        //     stp_tim=time_us_64()+3500000;
+        // }
 
         // test current transforms
         // for(float test_theta=0;test_theta<_2PI;test_theta+=0.05){
