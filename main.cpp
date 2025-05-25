@@ -582,7 +582,7 @@ class PIController{
             this->ramp=ramp; //max rate of change
             this->previous_output=0;
             this->previous_integral_comp=0;
-            previous_time=time_us_64();
+            this->previous_time=time_us_64();
         }
         float compute(float error){
             uint64_t current_time=time_us_64();
@@ -620,8 +620,8 @@ class PIController{
                 output=-max_output;
             else if(output>max_output)
                 output=max_output;
+                
             previous_output=output;
-
             return output;
         }
         float kp;
