@@ -47,11 +47,11 @@
 #define _UART_RX_PIN 9
 
 /////////////////////////////////////////////////////////////////Useful constants//////////////////
-#define _2PI        6.2831853072
-#define _PIover3    1.0471975512
-#define _1overSQRT3 0.5773502691
-#define _twothirds  0.666666666
-#define _sqrt3over2 0.86602540378
+#define _2PI        6.2831853072f
+#define _PIover3    1.0471975512f
+#define _1overSQRT3 0.5773502691f
+#define _twothirds  0.666666666f
+#define _sqrt3over2 0.86602540378f
 
 ////////////////////////////////////////////////////////////////////MONITORING SEGMENT//////////////////////////////
 
@@ -304,7 +304,7 @@ class motor_current{
         void update_ab_values(){
             //formulas from https://www.ti.com/lit/an/bpra048/bpra048.pdf   ; tested using https://www.mathworks.com/help/mcb/ref/clarketransform.html
             //simplefoc does something about sign too
-            alpha=_twothirds*(a-0.5*(b+c));
+            alpha=_twothirds*(a-0.5f*(b+c));
             beta=_twothirds*(_sqrt3over2*(b-c));
         }
         // park transform
@@ -347,9 +347,9 @@ class current_sensors{
         uint pinA;
         uint pinB;
         uint pinC;
-        const float VCC_ADC_PICO=3.3;
-        const float BIT_STEP=4096.0;
-        const float gain=0.165; //test this without current limiting by changing voltage
+        const float VCC_ADC_PICO=3.3f;
+        const float BIT_STEP=4096.0f;
+        const float gain=0.165f; //test this without current limiting by changing voltage
         float center_offset_voltage_a=0;
         float center_offset_voltage_b=0;
         float center_offset_voltage_c=0;
@@ -369,9 +369,9 @@ class current_sensors{
                 center_offset_voltage_b+=read_raw_voltage(_CURRENT_SENSE_CHANNEL_B);
                 center_offset_voltage_c+=read_raw_voltage(_CURRENT_SENSE_CHANNEL_C);
             }
-            center_offset_voltage_a/=10000.0;
-            center_offset_voltage_b/=10000.0;
-            center_offset_voltage_c/=10000.0;
+            center_offset_voltage_a/=10000.0f;
+            center_offset_voltage_b/=10000.0f;
+            center_offset_voltage_c/=10000.0f;
         }
 };
 
@@ -446,17 +446,17 @@ class encoder{
         }
         // returns angle in DEG
         float get_angle_deg(){
-            return (float)get_angle()/16384.0*360.0;   //16384 is the number of pulses per rotation (cpr)
+            return (float)get_angle()/16384.0f*360.0f;   //16384 is the number of pulses per rotation (cpr)
         }
         //returns angle in RAD
         float get_angle_rad(){
-            return (float)get_angle()/16384.0*_2PI;
+            return (float)get_angle()/16384.0f*_2PI;
         }
         //returns the FILTERED VELOCITY in rad/s
         float get_velocity(){  ///velocity timer might overflow. test/solve
             uint64_t current_time=time_us_64();
             float delta_time=current_time-old_time; //us
-            delta_time/=1000000.0; //s
+            delta_time/=1000000.0f; //s
 
             float current_angle=get_angle_rad(); //rad
             float delta_angle=current_angle-old_angle;
@@ -482,11 +482,11 @@ class encoder{
         }
         //returns unwrapped angle as degrees
         float get_unwrapped_angle_deg(){
-            return (float)get_unwrapped_angle()/16384.0*360.0;
+            return (float)get_unwrapped_angle()/16384.0f*360.0f;
         }
         //returns unwrapped angle as radians
         float get_unwrapped_angle_rad(){
-            return (float)get_unwrapped_angle()/16384.0*_2PI;
+            return (float)get_unwrapped_angle()/16384.0f*_2PI;
         }
         
         private:
@@ -525,7 +525,7 @@ class bridge_driver{
             pwm_wrap=calc_wrap(pwm_freq);
             pwm_config_set_phase_correct(&conf,true); // the pwm uses a numerical comparator, but this is similar to making our carrier wave a triangle wave instead of a sawtooth, but it also halves our calculated frequency, so it has to be adjusted (halve wrap)
             pwm_config_set_wrap(&conf, pwm_wrap);
-            pwm_config_set_clkdiv(&conf,1.0);
+            pwm_config_set_clkdiv(&conf,1.0f);
             pwm_init(slice_A, &conf, false);
             pwm_init(slice_B, &conf, false);
             pwm_init(slice_C, &conf, false);
@@ -573,53 +573,46 @@ class bridge_driver{
 //PID Controller
 class PIController{
     public:
-        PIController(float kp,float ki,float max_output,float ramp){
+        PIController(float kp,float ki,float max_output,float maxRate){
             this->kp=kp;
             this->ki=ki;
             this->integral_comp=0;
             this->prev_error=0;
             this->max_output=max_output;
-            this->ramp=ramp; //max rate of change
+            this->maxRate=maxRate; //max rate of change
             this->previous_output=0;
-            this->previous_integral_comp=0;
-            this->previous_time=time_us_64();
         }
-        float compute(float error){
-            uint64_t current_time=time_us_64();
-            float delta_time=(current_time-previous_time)/1000000.0; //i could get rid of this by using the time from the foc loop
-            previous_time=current_time;
-            
+        float compute(float setpoint, float measured, float delta_time){
+            float error = setpoint- measured;
+
             float proportional_comp=kp*error;
 
-            integral_comp+=ki*delta_time*0.5*(error+prev_error);  //magic from simplefoc  ;; Trapezoidal integration?
+            integral_comp+=ki*delta_time*0.5f*(error+prev_error);  //magic from simplefoc  ;; Trapezoidal integration?
             prev_error=error;
-            
-            //antiwindup
-            if(integral_comp<-max_output/2)
-                integral_comp=-max_output/2;
-            else if(integral_comp>max_output/2)
-                integral_comp=max_output/2;
             
             //calculate output
             float output=proportional_comp + integral_comp;
             
             //ramp
-            float max_delta=ramp*delta_time;
+            float max_delta=maxRate*delta_time;
             if(output-previous_output>max_delta){
                 output=previous_output+max_delta;
-                integral_comp=previous_integral_comp;
+                integral_comp=output-proportional_comp;  //anti windup
             }
             else if(previous_output-output>max_delta){
                 output=previous_output-max_delta;
-                integral_comp=previous_integral_comp;
+                integral_comp=output-proportional_comp; //anti windup
             }
-            previous_integral_comp=integral_comp;
 
             //limit output value
-            if(output<-max_output)
-                output=-max_output;
-            else if(output>max_output)
+            if(output>max_output){
                 output=max_output;
+                integral_comp=output-proportional_comp;  //anti windup
+            }
+            else if(output<-max_output){
+                output=-max_output;
+                integral_comp=output-proportional_comp;  //anti windup
+            }
                 
             previous_output=output;
             return output;
@@ -627,18 +620,16 @@ class PIController{
         float kp;
         float ki;
         float integral_comp;
-        float previous_integral_comp;
         float prev_error;
-        uint64_t previous_time;
         float max_output;
-        float ramp;
+        float maxRate;
         float previous_output;
 };
 
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(50,1200,14,9999),iq_filter(0.01),vel_controller(-0.05,-0.3,1.4,90),angle_controller(8,1,45,5){ //old angle ki and kp: 50,550,25,9999
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(50.0f,1200.0f,14.0f,9999.0f),iq_filter(0.01f),vel_controller(-0.05f,-0.3f,1.4f,90.0f),angle_controller(8.0f,1.0f,45.0f,5.0f){ //old angle ki and kp: 50,550,25,9999
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensors;
@@ -656,6 +647,7 @@ class foc_controller{
             iq_target=0;
             velocity_target=0;
             angle_target=0;
+
             //default manual reference values
             mode=3; //default mode is angle control
             manual_uq=0;
@@ -673,7 +665,7 @@ class foc_controller{
             float sum_sin=0;
             float sum_cos=0;
             asoc_driver->enable();
-            setSVPWM(6.9,M_PI); //move motor to 180 deg (pi rad)
+            setSVPWM(6.9f,M_PI); //move motor to 180 deg (pi rad)
             sleep_ms(1000);
             for(int i=0;i<tests;i++){
                 float el_ang=get_electrical_angle();
@@ -694,7 +686,7 @@ class foc_controller{
         void loop(){
             //calculate dt
             uint64_t current_time=time_us_64();
-            float delta_time=(current_time-old_update_time)/1000000.0;
+            float delta_time=(current_time-old_update_time)*1e-6f;
             old_update_time=current_time;
 
             //angle controller (this jumps for angle_target=0; also it only sometimes jumps)
@@ -702,15 +694,13 @@ class foc_controller{
                 angle_target=manual_angle_target;
             float angle_meas=asoc_encoder->get_unwrapped_angle_rad();
             old_angle_target=angle_target;
-            float angle_error=old_angle_target-angle_meas;
-            velocity_target=angle_controller.compute(angle_error);
+            velocity_target=angle_controller.compute(old_angle_target,angle_meas,delta_time);
 
             //velocity controller conf ~200us exec (this doesnt jump for velocity target=0)
             if(mode==2)
                 velocity_target=manual_velocity_target;
             float velocity_meas=asoc_encoder->get_velocity(); 
-            float vel_error=velocity_target-velocity_meas;
-            iq_target=vel_controller.compute(vel_error);
+            iq_target=vel_controller.compute(velocity_target,velocity_meas,delta_time);
 
             //current controller
             if(mode==1)
@@ -719,8 +709,7 @@ class foc_controller{
             motor_current meas_current=asoc_cs->get_motor_current(); 
             meas_current.update_dq_values(electrical_angle);
             meas_current.q=iq_filter.compute(meas_current.q); //low pass filter for iq current
-            float current_error=iq_target-meas_current.q;
-            uq=current_controller.compute(current_error);
+            uq=current_controller.compute(iq_target,meas_current.q,delta_time);
             
             //voltage controller
             if(mode==0)
@@ -817,7 +806,7 @@ class foc_controller{
             float m=M_SQRT3*(fabs(Vref)/(float)power_supply_voltage); //modulation index
             float T1=m*sin_aprox(sector*_PIover3-el_angle);
             float T2=m*sin_aprox(el_angle-(sector-1)*_PIover3);
-            float T0=1.0-T1-T2;
+            float T0=1.0f-T1-T2;
             // translate duty cycles to sectors
             float dA,dB,dC; //duty cycles for each phase;
             switch(sector){
@@ -859,9 +848,9 @@ class foc_controller{
                     break;
             }
             if(Vref<0){ //reverse duty cycle if ref is negative
-                dA=1.0-dA;
-                dB=1.0-dB;
-                dC=1.0-dC;
+                dA=1.0f-dA;
+                dB=1.0f-dB;
+                dC=1.0f-dC;
             }
             asoc_driver->set_pwm_duty(dA,dB,dC);
         }
