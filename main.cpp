@@ -811,6 +811,8 @@ class foc_controller{
         }
         // sets the pwm from a voltage reference
         void setSVPWM(float Vref, float el_angle){ //implemented according to https://www.e3s-conferences.org/articles/e3sconf/pdf/2021/64/e3sconf_suse2021_01059.pdf, but modified the m and the formulas for correct scaling
+            if(Vref<0)
+                el_angle+=M_PI;
             el_angle=wrap_rad(el_angle); //el_angle has to be clamped between 0 and 2pi
             int sector = int(el_angle/_PIover3)+1;
             //calculate times
@@ -857,11 +859,6 @@ class foc_controller{
                     dB=T0/2;
                     dC=T1+T0/2;
                     break;
-            }
-            if(Vref<0){ //reverse duty cycle if ref is negative
-                dA=1.0f-dA;
-                dB=1.0f-dB;
-                dC=1.0f-dC;
             }
             asoc_driver->set_pwm_duty(dA,dB,dC);
         }
