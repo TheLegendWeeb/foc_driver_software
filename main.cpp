@@ -1224,6 +1224,11 @@ int main()
     // int phs=0;
     // m_cmd_packet.command=1;
     // monitoring_mask=0b0000001110000;
+
+    sleep_ms(5000);
+    for(float i=0;i<=2*M_PI;i+=0.002){
+        printf("%f %f %f\n",i,sinf(i),sin_aprox(i));
+    }
     while (true) {
         uart_check_command();
         handle_monitoring(monitoring_mask); //monitoring segment
