@@ -40,19 +40,18 @@
 #define _LIMIT_SWITCH_RIGHT 4
 #define _LIMIT_SWITCH_LEFT 5
 
-//Useful constants
-#define _2PI        6.2831853072
-#define _PIover3    1.0471975512
-#define _SQRT3      1.7320508075
-#define _1overSQRT3 0.5773502691
-#define _twothirds  0.666666666
-#define _sqrt3over2 0.86602540378
-
 //UART defines
 #define _UART_ID uart1
 #define _BAUD_RATE 115200
 #define _UART_TX_PIN 8
 #define _UART_RX_PIN 9
+
+/////////////////////////////////////////////////////////////////Useful constants//////////////////
+#define _2PI        6.2831853072
+#define _PIover3    1.0471975512
+#define _1overSQRT3 0.5773502691
+#define _twothirds  0.666666666
+#define _sqrt3over2 0.86602540378
 
 ////////////////////////////////////////////////////////////////////MONITORING SEGMENT//////////////////////////////
 
@@ -237,7 +236,7 @@ void uart_check_command(){
     }
 }
 
-///////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////TRIGONOMETRY FUNCTIONS////////////////////////////
 
 //this wraps an angle to the 0 to 2PI range
 float wrap_rad(float angle_rad){
@@ -288,6 +287,7 @@ float cos_aprox(float angle_rad){
 }
 
 
+/////////////////////////////////////////////////////////////////////////CLASS DEFINITIONS///////////////////////////////////////////////
 
 //current class. Contains a,b,c,d,q and the associated methods
 // how do i make this efficient. Maybe an update function? That could open opportunities for errors
@@ -814,7 +814,7 @@ class foc_controller{
             el_angle=wrap_rad(el_angle); //el_angle has to be clamped between 0 and 2pi
             int sector = int(el_angle/_PIover3)+1;
             //calculate times
-            float m=_SQRT3*(fabs(Vref)/(float)power_supply_voltage); //modulation index
+            float m=M_SQRT3*(fabs(Vref)/(float)power_supply_voltage); //modulation index
             float T1=m*sin_aprox(sector*_PIover3-el_angle);
             float T2=m*sin_aprox(el_angle-(sector-1)*_PIover3);
             float T0=1.0-T1-T2;
@@ -1209,44 +1209,45 @@ int main()
     // stp1.zero_motor();
     // stp2.zero_motor();
     
-    // stp1.set_dir(stepper_driver::CW);
-    // stp2.set_dir(stepper_driver::CW);
-    // stp1.move_mm(50,stepper_driver::CCW);
-    // stp2.move(200*4,stepper_driver::CCW);
-
-    //tuning
-    command_packet m_cmd_packet;
-    m_cmd_packet.command = 0;
-    m_cmd_packet.arguments[0]=3; //current
-    queue_add_blocking(&comm_queue_01,&m_cmd_packet);
+    stp1.set_dir(stepper_driver::CW);
+    stp2.set_dir(stepper_driver::CW);
+    stp1.move_mm(50,stepper_driver::CCW);
+    stp2.move(200*4,stepper_driver::CCW);
     
-    uint64_t stp_tim=time_us_64()+500000;
-    int phs=0;
-    m_cmd_packet.command=1;
+    //tuning
+    // command_packet m_cmd_packet;
+    // m_cmd_packet.command = 0;
+    // m_cmd_packet.arguments[0]=3; //current
+    // queue_add_blocking(&comm_queue_01,&m_cmd_packet);
+    
+    // uint64_t stp_tim=time_us_64()+500000;
+    // int phs=0;
+    // m_cmd_packet.command=1;
     while (true) {
         uart_check_command();
         handle_monitoring(monitoring_mask); //monitoring segment
 
-        if(time_us_64()>stp_tim){
-            if(phs==0){
-                m_cmd_packet.arguments[0]=5;
-                phs++;
-            } 
-            else if(phs==1){
-                m_cmd_packet.arguments[0]=0;
-                phs++;
-            }
-            else if(phs==2){
-                m_cmd_packet.arguments[0]=-5;
-                phs++;
-            }
-            else if(phs==3){
-                m_cmd_packet.arguments[0]=0;
-                phs=0;
-            }
-            queue_add_blocking(&comm_queue_01,&m_cmd_packet);
-            stp_tim=time_us_64()+3500000;
-        }
+        //tune setup
+        // if(time_us_64()>stp_tim){
+        //     if(phs==0){
+        //         m_cmd_packet.arguments[0]=5;
+        //         phs++;
+        //     } 
+        //     else if(phs==1){
+        //         m_cmd_packet.arguments[0]=0;
+        //         phs++;
+        //     }
+        //     else if(phs==2){
+        //         m_cmd_packet.arguments[0]=-5;
+        //         phs++;
+        //     }
+        //     else if(phs==3){
+        //         m_cmd_packet.arguments[0]=0;
+        //         phs=0;
+        //     }
+        //     queue_add_blocking(&comm_queue_01,&m_cmd_packet);
+        //     stp_tim=time_us_64()+3500000;
+        // }
 
         // test current transforms
         // for(float test_theta=0;test_theta<_2PI;test_theta+=0.05){
@@ -1311,6 +1312,7 @@ int main()
         //     g_limit_switch_left_triggered=false;
         // }
 
+        //stepper loops
         // stp1.loop();
         // stp2.loop();
     }
