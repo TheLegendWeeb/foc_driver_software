@@ -70,6 +70,7 @@ uint32_t monitoring_mask=0; // not monitoring anything by default
 #define MASK_IQ_M        BIT(9) 
 #define MASK_UQ          BIT(10) 
 #define MASK_EL_ANGLE    BIT(11) 
+#define MASK_PID_C_I    BIT(12) 
 //structure used for monitoring variables inside second core
 volatile struct monitoring_data{
     float currents_abc[3]; // a,b,c
@@ -80,7 +81,7 @@ volatile struct monitoring_data{
     float uq;
     float el_angle;
     //pid values
-
+    float pid_accum[3];
 } shared_monitoring_data;
 const volatile float* values[] = {  //array used to iterate through the possible variables
     &shared_monitoring_data.currents_abc[0], &shared_monitoring_data.currents_abc[1], &shared_monitoring_data.currents_abc[2], //currents
@@ -89,10 +90,11 @@ const volatile float* values[] = {  //array used to iterate through the possible
     &shared_monitoring_data.velocity[0], &shared_monitoring_data.velocity[1], //velocity
     &shared_monitoring_data.iq[0], &shared_monitoring_data.iq[1], //iq
     &shared_monitoring_data.uq,
-    &shared_monitoring_data.el_angle 
+    &shared_monitoring_data.el_angle,
+    &shared_monitoring_data.pid_accum[0]
 };
 void handle_monitoring(uint32_t mask){
-    for(int i=0;i<12;i++){
+    for(int i=0;i<13;i++){
         if(mask&(1<<i)){
             printf("%f ",*values[i]);
         }
@@ -613,10 +615,22 @@ class PIController{
                 output=-max_output;
                 integral_comp=output-proportional_comp;  //anti windup
             }
+
+            if (ki==0){
+                integral_comp=0;
+            }
                 
             previous_output=output;
             return output;
         }
+        void setKP(float new_kp){
+            this->kp=new_kp;
+        }
+        void setKI(float new_ki){
+            this->ki=new_ki;
+            this->integral_comp=0;
+        }
+    //private:
         float kp;
         float ki;
         float integral_comp;
@@ -629,7 +643,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(50.0f,1200.0f,14.0f,9999.0f),iq_filter(0.01f),vel_controller(-0.05f,-0.3f,1.4f,90.0f),angle_controller(8.0f,1.0f,45.0f,5.0f){ //old angle ki and kp: 50,550,25,9999
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(50.0f,1350.0f,14.0f,9999.0f),iq_filter(0.01f),vel_controller(-0.1f,-5,1.4f,90.0f),angle_controller(2.5f,3.0f,45.0f,7.0f){ //old angle ki and kp: 50,550,25,9999
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensors;
@@ -739,6 +753,7 @@ class foc_controller{
             shared_monitoring_data.iq[1]=meas_current.q;
             shared_monitoring_data.uq=uq;
             shared_monitoring_data.el_angle=electrical_angle;
+            shared_monitoring_data.pid_accum[0]=current_controller.integral_comp;
         }
         //pid target variables
         float uq;
@@ -1140,31 +1155,31 @@ void foc_second_core(){
             else if(comm_packet.command==2){ //change regulator
                 if(comm_packet.arguments[0]==1){ //current
                     if(comm_packet.arguments[1]==0){
-                        foc.current_controller.kp=comm_packet.arguments[2];
+                        foc.current_controller.setKP(comm_packet.arguments[2]);
                         // printf("C1: CURRENT NEW KP %f\n",foc.current_controller.kp);
                     }
                     else if(comm_packet.arguments[1]==1){
-                        foc.current_controller.ki=comm_packet.arguments[2];
+                        foc.current_controller.setKI(comm_packet.arguments[2]);
                         // printf("C1: CURRENT NEW KI %f\n",foc.current_controller.ki);
                     }
                 }
                 else if(comm_packet.arguments[0]==2){ //velocity
                     if(comm_packet.arguments[1]==0){
-                        foc.vel_controller.kp=comm_packet.arguments[2];
+                        foc.vel_controller.setKP(comm_packet.arguments[2]);
                         // printf("C1: VEL NEW KP %f\n",foc.vel_controller.kp);
                     }
                     else if(comm_packet.arguments[1]==1){
-                        foc.vel_controller.ki=comm_packet.arguments[2];
+                        foc.vel_controller.setKI(comm_packet.arguments[2]);
                         // printf("C1: VEL NEW KI %f\n",foc.vel_controller.ki);
                     }
                 }
                 else if(comm_packet.arguments[0]==3){ //angle
                     if(comm_packet.arguments[1]==0){
-                        foc.angle_controller.kp=comm_packet.arguments[2];
+                        foc.angle_controller.setKP(comm_packet.arguments[2]);
                         // printf("C1: ANG NEW KP %f\n",foc.angle_controller.kp);
                     }
                     else if(comm_packet.arguments[1]==1){
-                        foc.angle_controller.ki=comm_packet.arguments[2];
+                        foc.angle_controller.setKI(comm_packet.arguments[2]);
                         // printf("C1: ANG NEW KI %f\n",foc.angle_controller.ki);
                     }
                 }
@@ -1204,39 +1219,40 @@ int main()
     stp2.move(200*4,stepper_driver::CCW);
     
     //tuning
-    // command_packet m_cmd_packet;
-    // m_cmd_packet.command = 0;
-    // m_cmd_packet.arguments[0]=3; //current
-    // queue_add_blocking(&comm_queue_01,&m_cmd_packet);
+    command_packet m_cmd_packet;
+    m_cmd_packet.command = 0;
+    m_cmd_packet.arguments[0]=3; //mode
+    queue_add_blocking(&comm_queue_01,&m_cmd_packet);
     
-    // uint64_t stp_tim=time_us_64()+500000;
-    // int phs=0;
-    // m_cmd_packet.command=1;
+    uint64_t stp_tim=time_us_64()+500000;
+    int phs=0;
+    m_cmd_packet.command=1;
+    monitoring_mask=0b0000001110000;
     while (true) {
         uart_check_command();
         handle_monitoring(monitoring_mask); //monitoring segment
 
         //tune setup
-        // if(time_us_64()>stp_tim){
-        //     if(phs==0){
-        //         m_cmd_packet.arguments[0]=5;
-        //         phs++;
-        //     } 
-        //     else if(phs==1){
-        //         m_cmd_packet.arguments[0]=0;
-        //         phs++;
-        //     }
-        //     else if(phs==2){
-        //         m_cmd_packet.arguments[0]=-5;
-        //         phs++;
-        //     }
-        //     else if(phs==3){
-        //         m_cmd_packet.arguments[0]=0;
-        //         phs=0;
-        //     }
-        //     queue_add_blocking(&comm_queue_01,&m_cmd_packet);
-        //     stp_tim=time_us_64()+3500000;
-        // }
+        if(time_us_64()>stp_tim){
+            if(phs==0){
+                m_cmd_packet.arguments[0]=5;
+                phs++;
+            } 
+            else if(phs==1){
+                m_cmd_packet.arguments[0]=0;
+                phs++;
+            }
+            else if(phs==2){
+                m_cmd_packet.arguments[0]=-5;
+                phs++;
+            }
+            else if(phs==3){
+                m_cmd_packet.arguments[0]=0;
+                phs=0;
+            }
+            queue_add_blocking(&comm_queue_01,&m_cmd_packet);
+            stp_tim=time_us_64()+3500000;
+        }
 
         // test current transforms
         // for(float test_theta=0;test_theta<_2PI;test_theta+=0.05){
