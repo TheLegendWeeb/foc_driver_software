@@ -684,11 +684,11 @@ class foc_controller{
                 sum_cos+=cos(el_ang);
                 sleep_ms(10);
             }
-            
             float el_angle_offset_reconstructed=atan2(sum_sin/tests,sum_cos/tests);
             el_angle_offset=wrap_rad(el_angle_offset_reconstructed);
+            
             asoc_encoder->zero_sensor(); //cant remember where this went
-            old_angle_target=asoc_encoder->get_unwrapped_angle_rad();
+            angle_target=asoc_encoder->get_unwrapped_angle_rad();
             sleep_ms(1000);
             asoc_driver->disable();
             setSVPWM(0,0);
@@ -704,8 +704,7 @@ class foc_controller{
             if(mode==3)
                 angle_target=manual_angle_target;
             float angle_meas=asoc_encoder->get_unwrapped_angle_rad();
-            old_angle_target=angle_target;
-            velocity_target=angle_controller.compute(old_angle_target,angle_meas,delta_time);
+            velocity_target=angle_controller.compute(angle_target,angle_meas,delta_time);
 
             //velocity controller conf ~200us exec (this doesnt jump for velocity target=0)
             if(mode==2)
@@ -757,7 +756,6 @@ class foc_controller{
         float velocity_target;
         float angle_target;
 
-        float old_angle_target; //for angle rate_limit
         float old_update_time; //for calculating dt;
 
         ///// FUNCTIONS FOR MODE SELECTION AND TARGETS
