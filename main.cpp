@@ -591,28 +591,32 @@ class PIController{
             
             //calculate output
             float output=proportional_comp + integral_comp;
-            
+            //anti windup
+            if(integral_comp>max_output/2){
+                integral_comp=max_output/2;
+            }
+            else if(integral_comp<-max_output/2){
+                integral_comp=-max_output/2;
+            }
+              
             //ramp
             float max_delta=maxRate*delta_time;
+            float clamp_output;
             if(output-previous_output>max_delta){
                 output=previous_output+max_delta;
-                integral_comp=output-proportional_comp;  //anti windup
             }
             else if(previous_output-output>max_delta){
                 output=previous_output-max_delta;
-                integral_comp=output-proportional_comp; //anti windup
             }
 
             //limit output value
             if(output>max_output){
                 output=max_output;
-                integral_comp=output-proportional_comp;  //anti windup
             }
             else if(output<-max_output){
                 output=-max_output;
-                integral_comp=output-proportional_comp;  //anti windup
             }
-
+            
             if (ki==0){
                 integral_comp=0;
             }
@@ -640,7 +644,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(50.0f,1350.0f,14.0f,9999.0f),iq_filter(0.01f),vel_controller(-0.1f,-5,1.4f,90.0f),angle_controller(2.5f,3.0f,45.0f,7.0f){ //old angle ki and kp: 50,550,25,9999
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(50.0f,1000.0f,14.0f,9999.0f),iq_filter(0.01f),vel_controller(-0.05f,-0.04,1.4f,90.0f),angle_controller(3.0f,0.01f,45.0f,15.0f){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensors;
@@ -1215,7 +1219,7 @@ int main()
     // m_cmd_packet.arguments[0]=3; //mode
     // queue_add_blocking(&comm_queue_01,&m_cmd_packet);
     
-    // uint64_t stp_tim=time_us_64()+500000;
+    // uint64_t stp_tim=time_us_64()+3500000;
     // int phs=0;
     // m_cmd_packet.command=1;
     // monitoring_mask=0b0000001110000;
@@ -1227,7 +1231,7 @@ int main()
         //tune setup
         // if(time_us_64()>stp_tim){
         //     if(phs==0){
-        //         m_cmd_packet.arguments[0]=5;
+        //         m_cmd_packet.arguments[0]=10;
         //         phs++;
         //     } 
         //     else if(phs==1){
@@ -1235,7 +1239,7 @@ int main()
         //         phs++;
         //     }
         //     else if(phs==2){
-        //         m_cmd_packet.arguments[0]=-5;
+        //         m_cmd_packet.arguments[0]=-10;
         //         phs++;
         //     }
         //     else if(phs==3){
@@ -1243,7 +1247,7 @@ int main()
         //         phs=0;
         //     }
         //     queue_add_blocking(&comm_queue_01,&m_cmd_packet);
-        //     stp_tim=time_us_64()+3500000;
+        //     stp_tim=time_us_64()+5500000;
         // }
 
         // test current transforms
