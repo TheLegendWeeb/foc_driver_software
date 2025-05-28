@@ -680,7 +680,7 @@ class foc_controller{
             float sum_sin=0;
             float sum_cos=0;
             asoc_driver->enable();
-            setSVPWM(6.9f,M_PI); //move motor to 180 deg (pi rad)
+            setSVPWM(13,M_PI); //move motor to 180 deg (pi rad)
             sleep_ms(1000);
             for(int i=0;i<tests;i++){
                 float el_ang=get_electrical_angle();
