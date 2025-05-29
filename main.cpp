@@ -601,7 +601,6 @@ class PIController{
               
             //ramp
             float max_delta=maxRate*delta_time;
-            float clamp_output;
             if(output-previous_output>max_delta){
                 output=previous_output+max_delta;
             }
@@ -644,7 +643,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance):current_controller(50.0f,1000.0f,14.0f,9999.0f),iq_filter(0.01f),vel_controller(-0.05f,-0.04,1.4f,90.0f),angle_controller(3.0f,0.01f,45.0f,15.0f){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance, float angle_ramp):current_controller(50.0f,1000.0f,14.0f,9999.0f),iq_filter(0.01f),vel_controller(-0.05f,-0.04,1.4f,990.0f),angle_controller(15,20,45.0f,999.0f){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensors;
@@ -662,6 +661,8 @@ class foc_controller{
             iq_target=0;
             velocity_target=0;
             angle_target=0;
+            prev_angle=0;
+            this->angle_ramp=angle_ramp;
 
             //default manual reference values
             mode=3; //default mode is angle control
@@ -669,7 +670,6 @@ class foc_controller{
             manual_iq_target=0;
             manual_velocity_target=0;
             manual_angle_target=0;
-
             el_angle_offset=0;
             old_update_time=0;
             align();
@@ -705,9 +705,17 @@ class foc_controller{
             old_update_time=current_time;
 
             //angle controller (this jumps for angle_target=0; also it only sometimes jumps)
+            float max_angle_delta= delta_time*angle_ramp; //trapezoid, maybe change to S
             if(mode==3)
                 angle_target=manual_angle_target;
             float angle_meas=asoc_encoder->get_unwrapped_angle_rad();
+            if(angle_target-prev_angle>max_angle_delta){
+                angle_target=prev_angle+max_angle_delta;
+            }
+            else if(prev_angle-angle_target>max_angle_delta){
+                angle_target=prev_angle-max_angle_delta;
+            }
+            prev_angle=angle_target;
             velocity_target=angle_controller.compute(angle_target,angle_meas,delta_time);
 
             //velocity controller conf ~200us exec (this doesnt jump for velocity target=0)
@@ -768,6 +776,8 @@ class foc_controller{
         float manual_iq_target;
         float manual_velocity_target;
         float manual_angle_target;
+        float prev_angle;
+        float angle_ramp;
         //sets the controller mode; 3=angle, 2=velocity, 1=torque, 0=voltage reference
         void set_mode(int mode){
             if(mode >=0 && mode <=3)
@@ -1128,7 +1138,7 @@ void foc_second_core(){
     current_sensors cs(_CURRENT_SENSE_PIN_A,_CURRENT_SENSE_PIN_B,_CURRENT_SENSE_PIN_C);
     bridge_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
     encoder encoder(spi0,_PIN_SCK,_PIN_CS,_PIN_MISO,_PIN_MOSI,true);
-    foc_controller foc(&drv,&encoder, &cs,7,24,15);
+    foc_controller foc(&drv,&encoder, &cs,7,24,15,6);
 
     foc.set_mode(3); 
     foc.set_angle(0);
