@@ -643,7 +643,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance, float angle_ramp):current_controller(50.0f,1000.0f,14.0f,9999.0f),iq_filter(0.01f),vel_controller(-0.05f,-0.04,1.4f,990.0f),angle_controller(15,20,45.0f,999.0f){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance, float angle_ramp):current_controller(50.0f,1000.0f,14.0f,9999.0f),iq_filter(0.01f),vel_controller(-0.05f,-0.04,1.4f,990.0f),angle_controller(15,40,45.0f,999.0f){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensors;
@@ -709,6 +709,7 @@ class foc_controller{
             if(mode==3)
                 angle_target=manual_angle_target;
             float angle_meas=asoc_encoder->get_unwrapped_angle_rad();
+                //apply ramp
             if(angle_target-prev_angle>max_angle_delta){
                 angle_target=prev_angle+max_angle_delta;
             }
