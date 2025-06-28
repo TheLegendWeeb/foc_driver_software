@@ -90,13 +90,17 @@ const volatile float* values[] = {  //array used to iterate through the possible
     &shared_monitoring_data.uq,
     &shared_monitoring_data.el_angle,
 };
+uint64_t sample_time_target=time_us_64();
 void handle_monitoring(uint32_t mask){
-    for(int i=0;i<12;i++){
-        if(mask&(1<<i)){
-            printf("%f ",*values[i]);
+    if(sample_time_target<time_us_64()){
+        for(int i=0;i<12;i++){
+            if(mask&(1<<i)){
+                printf("%f ",*values[i]);
+            }
         }
+        printf("\n");
+        sample_time_target=time_us_64()+10000;
     }
-    printf("\n");
 }
 
 //////////////////////////////////////////////////////////UART COMMS SEGENT//////////////////////////////
