@@ -1132,9 +1132,6 @@ class stepper_driver{
 
 };
 
-
-//temporary functions for testing
-
 //////////////////////////////////////////////////   MAIN LOOPS  ///////////////////////////////////////////////////////////////////////////////////////////
 void foc_second_core(){
     stdio_usb_init();
@@ -1214,18 +1211,18 @@ int main()
     multicore_launch_core1(foc_second_core);
 
     //adds limit switch interrupts for steppers
-    // add_limit_switch(_LIMIT_SWITCH_RIGHT);
-    // add_limit_switch(_LIMIT_SWITCH_LEFT);
+    add_limit_switch(_LIMIT_SWITCH_RIGHT);
+    add_limit_switch(_LIMIT_SWITCH_LEFT);
     
     //stepper driver initialization
-    stepper_driver stp1(_STEP_PINA,_DIR_PINA,&g_limit_switch_left_triggered,1.8,4);
-    stepper_driver stp2(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4);
+    stepper_driver lstp(_STEP_PINA,_DIR_PINA,&g_limit_switch_left_triggered,1.8,4);
+    stepper_driver rstp(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4);
     // stp1.zero_motor();
     // stp2.zero_motor();
     
-    stp1.set_dir(stepper_driver::CW);
-    stp2.set_dir(stepper_driver::CW);
-    //stp1.move_mm(50,stepper_driver::CCW);
+    lstp.set_dir(stepper_driver::CW);
+    rstp.set_dir(stepper_driver::CW);
+    lstp.move_mm(50,stepper_driver::CCW);
     //stp2.move(200*4,stepper_driver::CCW);
     
     //tuning
@@ -1240,45 +1237,10 @@ int main()
     // monitoring_mask=0b0000001110000;
 
     while (true) {
-        uart_check_command();
+        // uart_check_command();
         handle_monitoring(monitoring_mask); //monitoring segment
 
-        //tune setup
-        // if(time_us_64()>stp_tim){
-        //     if(phs==0){
-        //         m_cmd_packet.arguments[0]=10;
-        //         phs++;
-        //     } 
-        //     else if(phs==1){
-        //         m_cmd_packet.arguments[0]=0;
-        //         phs++;
-        //     }
-        //     else if(phs==2){
-        //         m_cmd_packet.arguments[0]=-10;
-        //         phs++;
-        //     }
-        //     else if(phs==3){
-        //         m_cmd_packet.arguments[0]=0;
-        //         phs=0;
-        //     }
-        //     queue_add_blocking(&comm_queue_01,&m_cmd_packet);
-        //     stp_tim=time_us_64()+5500000;
-        // }
 
-        // test current transforms
-        // for(float test_theta=0;test_theta<_2PI;test_theta+=0.05){
-        //     test_c.a=sin(test_theta);
-        //     test_c.b=sin(test_theta-(2*M_PI)/3.0);
-        //     test_c.c=sin(test_theta+(2*M_PI)/3.0);
-        //     // test_c.a=1.0;
-        //     // test_c.b=2.0;
-        //     // test_c.c=3.0;
-        //     test_c.update_dq_values(test_theta);
-        //     printf("%f %f %f %f %f %f %f      %f\n",test_c.a,test_c.b,test_c.c,test_c.alpha,test_c.beta,test_c.d,test_c.q,test_theta);
-        //     sleep_ms(50);
-        // }
-
-        //read command from usb
         // char buffer[100];
         // int increment;
         // if(!stp1.moving){
@@ -1329,8 +1291,8 @@ int main()
         // }
 
         //stepper loops
-        // stp1.loop();
-        // stp2.loop();
+        lstp.loop();
+        rstp.loop();
     }
 }
             
