@@ -39,6 +39,7 @@
 //limit switch pins
 #define _LIMIT_SWITCH_RIGHT 4
 #define _LIMIT_SWITCH_LEFT 5
+#define _LIMIT_SWITCH_ELEVATION 6
 
 //UART defines
 #define _UART_ID uart1
@@ -131,6 +132,8 @@ struct command_packet{
     float arguments[5];
 };
 // checks uart for new commands
+command_packet core0command;
+bool core0cmd_rcv=0;
 void uart_check_command(){
     if(uart_is_readable(_UART_ID)){
         char uart_message[32];
@@ -224,6 +227,28 @@ void uart_check_command(){
                 while(uart_message[index]=='1' || uart_message[index]=='0'){
                     monitoring_mask=(monitoring_mask<<1)|(uart_message[index++]-'0');
                 }
+            }
+            else if(uart_message[index]=='S'){ //temp stepper command
+                index++;
+                //read mm
+                char argument[30];
+                uint arg_index=0;
+                bool motor_to_move=2; // 0 for L, 1 for R
+                if(uart_message[index]=='L')
+                    motor_to_move=0;
+                else if(uart_message[index]=='R')
+                    motor_to_move=1;
+                index++;
+                while((uart_message[index]>='0' && uart_message[index]<='9') || uart_message[index]=='.' || uart_message[index]=='-'){
+                    argument[arg_index]=uart_message[index];
+                    index++;
+                    arg_index++;                    
+                } 
+                float mm_to_move=strtof(argument, NULL);
+                core0command.command=motor_to_move;
+                core0command.arguments[0]=mm_to_move;
+                core0cmd_rcv=1;
+                //both?
             }
             else if(uart_message[index]==' '){ //if whitespace, skip
                 index++;
@@ -915,31 +940,31 @@ void limit_switch_callback(uint gpio, uint32_t events){
     uint32_t current_time = time_us_32();
     if(gpio==_LIMIT_SWITCH_RIGHT){
         if (current_time - last_debounce_time_right > DEBOUNCE_DELAY_MS) {
-            // printf("right        ");
+            //printf("right        ");
             g_limit_switch_right_triggered = true;
             last_debounce_time_right = current_time;
         }
     }
     else if(gpio==_LIMIT_SWITCH_LEFT){
         if (current_time - last_debounce_time_left > DEBOUNCE_DELAY_MS) {
-            // printf("left");
+            //printf("left");
             g_limit_switch_left_triggered = true;
             last_debounce_time_left = current_time;
         }
     }
-    // printf("    %d\n",time_us_32());
+    //printf("    %d   ,\n",time_us_32());
 }
 void add_limit_switch(uint pin){
     gpio_init(pin);
     gpio_set_dir(pin,GPIO_IN);
-    gpio_pull_up(pin);
-    gpio_set_irq_enabled_with_callback(pin, GPIO_IRQ_EDGE_FALL, true, limit_switch_callback);
+    gpio_pull_down(pin);
+    gpio_set_irq_enabled_with_callback(pin, GPIO_IRQ_EDGE_RISE, true, limit_switch_callback);
 }
 
 // class for A4988 stepper driver
 class stepper_driver{
     public:
-        uint absolute_position_steps;
+        int absolute_position_steps;
         bool moving;
         stepper_driver(uint step_pin, uint dir_pin,volatile bool* asoc_limit_switch,float hw_angle_per_step=1.8,uint microstepping_mult=1,bool invert_dir=false){
             this->step_pin=step_pin;
@@ -1009,7 +1034,6 @@ class stepper_driver{
         void move_mm(float mm,direction dir){
             uint steps=mm_to_steps(mm);
             move(steps,dir);
-            absolute_position_steps+=(steps*(dir==CW?1:-1));
         }
         // function to zero stepper with a limit switch
         void zero_motor(){
@@ -1045,6 +1069,7 @@ class stepper_driver{
                 sleep_us(delay_stage_3);
             }
             absolute_position_steps=0;
+            *asoc_limit_switch=false;
             //now go to center position
 
         }
@@ -1113,13 +1138,12 @@ class stepper_driver{
             return ((float)steps/steps_per_rot)*mm_per_rot;
         }
         //this should be uint but comparing it with an int promotes the int to uint and the comparison is always true
-        int max_position_steps = 3500; //placeholder 111111111111!!!!!!!!!!!!!!!
+        int max_position_steps = 35400; //placeholder 111111111111!!!!!!!!!!!!!!!
         int offset_other_tooth; //placeholder this is the offset in case i want to zero from the other side
         int offset_center; //placeholder this is the offset to get to the center position(the middle of the zone)
         //this function adds or subtracts steps from absolute position counter
         void increment_position(uint steps,direction dir){
             //cw is pos, ccw is neg
-            // int newpos=position_steps+steps*(dir==CW?1:-1);
             int newpos=absolute_position_steps+steps*(dir==CW?1:-1);
             if(newpos>max_position_steps){
                 newpos-=max_position_steps;
@@ -1217,13 +1241,16 @@ int main()
     //stepper driver initialization
     stepper_driver lstp(_STEP_PINA,_DIR_PINA,&g_limit_switch_left_triggered,1.8,4);
     stepper_driver rstp(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4);
-    // stp1.zero_motor();
-    // stp2.zero_motor();
+    sleep_ms(2500);
+    lstp.zero_motor();
+    rstp.zero_motor();
     
+    printf("RESET ABS VALUES %d %d \n",lstp.absolute_position_steps,rstp.absolute_position_steps);
     lstp.set_dir(stepper_driver::CW);
     rstp.set_dir(stepper_driver::CW);
-    lstp.move_mm(50,stepper_driver::CCW);
+    // lstp.move_mm(50,stepper_driver::CCW);
     //stp2.move(200*4,stepper_driver::CCW);
+
     
     //tuning
     // command_packet m_cmd_packet;
@@ -1236,53 +1263,44 @@ int main()
     // m_cmd_packet.command=1;
     // monitoring_mask=0b0000001110000;
 
+    int i=0;
     while (true) {
-        // uart_check_command();
-        handle_monitoring(monitoring_mask); //monitoring segment
+        uart_check_command();
+        //stepper commands
+        if(core0cmd_rcv){
+            if(core0command.command==1){
+                //right
+                stepper_driver::direction dir=(core0command.arguments[0]>0) ? stepper_driver::CW : stepper_driver::CCW;
+                rstp.move(fabs(core0command.arguments[0]),dir);
+                printf("MOVED STEPPER RIGHT  %f stp   CPOS:%d\n",core0command.arguments[0],rstp.absolute_position_steps);
+            }
+            else if(core0command.command==0){
+                //left
+                stepper_driver::direction dir=(core0command.arguments[0]>0) ? stepper_driver::CW : stepper_driver::CCW;
+                lstp.move(fabs(core0command.arguments[0]),dir);
+                printf("MOVED STEPPER LEFT  %f  stp   CPOS:%d\n",core0command.arguments[0],lstp.absolute_position_steps);
+            }
+            core0cmd_rcv=0;
+        }
+        // handle_monitoring(monitoring_mask); //monitoring segment
 
-
-        // char buffer[100];
-        // int increment;
-        // if(!stp1.moving){
-        //     //i have to figure out how to find out the number of steps for a full cycle
-        //     // mayve I keep adding uintil we pass the limit switch and then add a command that goes backwards until it finds the limit switch
-        //     printf("CURRENT STEPS  %d\n",stp1.absolute_position_steps);
-        //    
-        //     fgets(buffer, sizeof(buffer), stdin);
-        //     if(strcmp(buffer,"back\n")==0){
-        //         stp1.set_dir(stepper_driver::CW);
-        //         while(!g_limit_switch_left_triggered){
-        //             stp1.step();
-        //             sleep_us(5000);
-        //             stp1.absolute_position_steps++;
-        //         }
-        //         printf("FOUND TOTAL LENGHT: %d\n",stp1.absolute_position_steps);
-        //     }
-        //     else{
-        //         increment=atoi(buffer);
-        //         printf("MOVING %d steps\n",increment);
-        //         stepper_driver::direction newdir=increment>0?stepper_driver::CW:stepper_driver::CCW;
-        //         increment= abs(increment);
-        //         stp1.move(increment,newdir);
-        //     }
-        // }
-        
+    
         
         /// alternate stepper rotations
-        // if(!stp1.moving && !stp2.moving){
+        // if(!lstp.moving && !rstp.moving){
         //     sleep_ms(1000);
         //     if(i){
-        //         stp1.move((int)5*200*4,stepper_driver::CCW);
-        //         stp2.move((int)5*200*4,stepper_driver::CW);
+        //         lstp.move((int)5*200*4,stepper_driver::CCW);
+        //         rstp.move((int)5*200*4,stepper_driver::CW);
         //     }
         //     else{
-        //         stp1.move((int)5*200*4,stepper_driver::CW);
-        //         stp2.move((int)5*200*4,stepper_driver::CCW);
+        //         lstp.move((int)5*200*4,stepper_driver::CW);
+        //         rstp.move((int)5*200*4,stepper_driver::CCW);
         //     }
         //     i=!i;
         // }
 
-        //reset limit switches... temp?
+        // reset limit switches... temp?
         // if(g_limit_switch_right_triggered){
         //     g_limit_switch_right_triggered=false;
         // }
