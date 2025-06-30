@@ -966,7 +966,7 @@ class stepper_driver{
     public:
         int absolute_position_steps;
         bool moving;
-        stepper_driver(uint step_pin, uint dir_pin,volatile bool* asoc_limit_switch,float hw_angle_per_step=1.8,uint microstepping_mult=1,bool invert_dir=false,int center_pos){
+        stepper_driver(uint step_pin, uint dir_pin,volatile bool* asoc_limit_switch,float hw_angle_per_step=1.8,uint microstepping_mult=1,bool invert_dir=false){
             this->step_pin=step_pin;
             this->dir_pin=dir_pin;
             this->hw_angle_per_step=hw_angle_per_step;
@@ -976,7 +976,6 @@ class stepper_driver{
             this->moving=false;
             this->asoc_limit_switch=asoc_limit_switch;
 
-            this->offset_center=center_pos;
             gpio_init(step_pin);
             gpio_set_dir(step_pin,GPIO_OUT);
             gpio_put(step_pin,0);
@@ -1036,6 +1035,10 @@ class stepper_driver{
             uint steps=mm_to_steps(mm);
             move(steps,dir);
         }
+        void move_int(int steps){
+            direction dir=(steps>0) ? CW : CCW;
+            move(abs(steps),dir);
+        }
         // function to zero stepper with a limit switch
         void zero_motor(){
             uint delay_stage_1=1000;
@@ -1071,8 +1074,6 @@ class stepper_driver{
             }
             absolute_position_steps=0;
             *asoc_limit_switch=false;
-            //now go to center position
-
         }
 
         private:
@@ -1140,8 +1141,6 @@ class stepper_driver{
         }
         //this should be uint but comparing it with an int promotes the int to uint and the comparison is always true
         int max_position_steps = 3500; //placeholder 111111111111!!!!!!!!!!!!!!!
-        int offset_other_tooth; //placeholder this is the offset in case i want to zero from the other side
-        int offset_center; //placeholder this is the offset to get to the center position(the middle of the zone)
         //this function adds or subtracts steps from absolute position counter
         void increment_position(uint steps,direction dir){
             //cw is pos, ccw is neg
@@ -1154,23 +1153,28 @@ class stepper_driver{
 /// class for controling extractor
 class extractor{
     public:
-        extractor(stepper_driver* associated_left_step, stepper_driver* associated_right_step,int loop_lenght_steps,int center_offset_left, int center_offset_right){
+        extractor(stepper_driver* associated_left_step, stepper_driver* associated_right_step,int center_offset_left, int center_offset_right){
             this->asoc_left_step=associated_left_step;
             this->asoc_right_step=associated_right_step;
-            this->loop_lenght_steps=loop_lenght_steps;
             this->center_offset_left=center_offset_left;
             this->center_offset_right=center_offset_right;
-
         }
         void zero_motors(){
-            
+            asoc_left_step->zero_motor();
+            asoc_right_step->zero_motor();
+            asoc_left_step->move(center_offset_left,stepper_driver::CW);
+            asoc_right_step->move(center_offset_right,stepper_driver::CW);
+        }
+        void loop(){
+            asoc_left_step->loop();
+            asoc_right_step->loop();
         }
     private:
-        stepper_driver* asoc_left_step,asoc_right_step;
-        int loop_lenght_steps;
+        stepper_driver* asoc_left_step;
+        stepper_driver* asoc_right_step;
         int center_offset_left;
         int center_offset_right;
-}
+};
 //////////////////////////////////////////////////   MAIN LOOPS  ///////////////////////////////////////////////////////////////////////////////////////////
 void foc_second_core(){
     stdio_usb_init();
@@ -1254,16 +1258,15 @@ int main()
     add_limit_switch(_LIMIT_SWITCH_LEFT);
     
     //stepper driver initialization
-    stepper_driver lstp(_STEP_PINA,_DIR_PINA,&g_limit_switch_left_triggered,1.8,4,false,1940);
-    stepper_driver rstp(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4,false,2150);
+    stepper_driver lstp(_STEP_PINA,_DIR_PINA,&g_limit_switch_left_triggered,1.8,4);
+    stepper_driver rstp(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4);
 
-    extractor extr(&lstp,&rstp,3500,1940,2150);
+    extractor extr(&lstp,&rstp,1940,2150);
     sleep_ms(2500);
-    lstp.zero_motor();
-    rstp.zero_motor();
+    extr.zero_motors();
     
-    lstp.set_dir(stepper_driver::CW);
-    rstp.set_dir(stepper_driver::CW);
+    // lstp.set_dir(stepper_driver::CW);
+    // rstp.set_dir(stepper_driver::CW);
     // lstp.move_mm(50,stepper_driver::CCW);
     //stp2.move(200*4,stepper_driver::CCW);
 
@@ -1286,14 +1289,12 @@ int main()
         if(core0cmd_rcv){
             if(core0command.command==1){
                 //right
-                stepper_driver::direction dir=(core0command.arguments[0]>0) ? stepper_driver::CW : stepper_driver::CCW;
-                rstp.move(fabs(core0command.arguments[0]),dir);
+                rstp.move_int(core0command.arguments[0]);
                 printf("MOVED STEPPER RIGHT  %f stp   CPOS:%d\n",core0command.arguments[0],rstp.absolute_position_steps);
             }
             else if(core0command.command==0){
                 //left
-                stepper_driver::direction dir=(core0command.arguments[0]>0) ? stepper_driver::CW : stepper_driver::CCW;
-                lstp.move(fabs(core0command.arguments[0]),dir);
+                lstp.move_int(core0command.arguments[0]);
                 printf("MOVED STEPPER LEFT  %f  stp   CPOS:%d\n",core0command.arguments[0],lstp.absolute_position_steps);
             }
             core0cmd_rcv=0;
@@ -1325,8 +1326,7 @@ int main()
         // }
 
         //stepper loops
-        lstp.loop();
-        rstp.loop();
+        extr.loop();
     }
 }
             
