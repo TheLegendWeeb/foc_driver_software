@@ -228,25 +228,24 @@ void uart_check_command(){
                     monitoring_mask=(monitoring_mask<<1)|(uart_message[index++]-'0');
                 }
             }
-            else if(uart_message[index]=='S'){ //temp stepper command
+            else if(uart_message[index]=='E'){ //temp stepper command
                 index++;
-                //read mm
                 char argument[30];
                 uint arg_index=0;
-                bool motor_to_move=2; // 0 for L, 1 for R
-                if(uart_message[index]=='L')
-                    motor_to_move=0;
-                else if(uart_message[index]=='R')
-                    motor_to_move=1;
+                uint side;
+                float op;
+                if(uart_message[index]=='F')
+                    side=0;
+                else if(uart_message[index]=='B')
+                    side=1;
                 index++;
-                while((uart_message[index]>='0' && uart_message[index]<='9') || uart_message[index]=='.' || uart_message[index]=='-'){
-                    argument[arg_index]=uart_message[index];
-                    index++;
-                    arg_index++;                    
-                } 
-                float mm_to_move=strtof(argument, NULL);
-                core0command.command=motor_to_move;
-                core0command.arguments[0]=mm_to_move;
+                if(uart_message[index]=='I')
+                    op=0;
+                else if(uart_message[index]=='O')
+                    op=1;
+                index++;
+                core0command.command=side;
+                core0command.arguments[0]=op;
                 core0cmd_rcv=1;
                 //both?
             }
@@ -1335,14 +1334,26 @@ int main()
         //stepper commands
         if(core0cmd_rcv){
             if(core0command.command==1){
-                //right
-                rstp.move_int(core0command.arguments[0]);
-                printf("MOVED STEPPER RIGHT  %f stp   CPOS:%d\n",core0command.arguments[0],rstp.absolute_position_steps);
+                //back
+                if(core0command.arguments[0]){
+                    //ext
+                    extr.extract_back();
+                }
+                else{
+                    //ins
+                    extr.insert_back();
+                }
             }
             else if(core0command.command==0){
-                //left
-                lstp.move_int(core0command.arguments[0]);
-                printf("MOVED STEPPER LEFT  %f  stp   CPOS:%d\n",core0command.arguments[0],lstp.absolute_position_steps);
+                //front
+                if(core0command.arguments[0]){
+                    //ext
+                    extr.extract_front();
+                }
+                else{
+                    //ins
+                    extr.insert_front();
+                }
             }
             core0cmd_rcv=0;
         }
