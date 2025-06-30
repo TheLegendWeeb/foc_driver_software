@@ -1151,7 +1151,26 @@ class stepper_driver{
         }   
 
 };
+/// class for controling extractor
+class extractor{
+    public:
+        extractor(stepper_driver* associated_left_step, stepper_driver* associated_right_step,int loop_lenght_steps,int center_offset_left, int center_offset_right){
+            this->asoc_left_step=associated_left_step;
+            this->asoc_right_step=associated_right_step;
+            this->loop_lenght_steps=loop_lenght_steps;
+            this->center_offset_left=center_offset_left;
+            this->center_offset_right=center_offset_right;
 
+        }
+        void zero_motors(){
+            
+        }
+    private:
+        stepper_driver* asoc_left_step,asoc_right_step;
+        int loop_lenght_steps;
+        int center_offset_left;
+        int center_offset_right;
+}
 //////////////////////////////////////////////////   MAIN LOOPS  ///////////////////////////////////////////////////////////////////////////////////////////
 void foc_second_core(){
     stdio_usb_init();
@@ -1237,6 +1256,8 @@ int main()
     //stepper driver initialization
     stepper_driver lstp(_STEP_PINA,_DIR_PINA,&g_limit_switch_left_triggered,1.8,4,false,1940);
     stepper_driver rstp(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4,false,2150);
+
+    extractor extr(&lstp,&rstp,3500,1940,2150);
     sleep_ms(2500);
     lstp.zero_motor();
     rstp.zero_motor();
