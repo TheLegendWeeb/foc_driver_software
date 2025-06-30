@@ -702,7 +702,6 @@ class foc_controller{
             manual_angle_target=0;
             el_angle_offset=0;
             old_update_time=0;
-            align();
         }
         //find offset for electrical angle
         void align(){
@@ -905,6 +904,24 @@ class foc_controller{
             }
             asoc_driver->set_pwm_duty(dA,dB,dC);
         }
+        void man_rot(int cycles){
+            asoc_driver->enable();
+            for(int i=0;i<cycles;i++){
+                asoc_driver->set_pwm_duty(1,0,0);
+                sleep_ms(500);
+                asoc_driver->set_pwm_duty(1,1,0);
+                sleep_ms(500); 
+                asoc_driver->set_pwm_duty(0,1,0);
+                sleep_ms(500);
+                asoc_driver->set_pwm_duty(0,1,1);
+                sleep_ms(500);
+                asoc_driver->set_pwm_duty(0,0,1);
+                sleep_ms(500);
+                asoc_driver->set_pwm_duty(1,0,1);
+                sleep_ms(500);
+            }
+            asoc_driver->set_pwm_duty(0,0,0);
+        }
         enum direction{
             CW=0,
             CCW=1
@@ -935,8 +952,11 @@ class foc_controller{
 #define DEBOUNCE_DELAY_MS 500
 volatile bool g_limit_switch_right_triggered=false;
 volatile bool g_limit_switch_left_triggered=false;
+volatile bool g_limit_switch_el_triggered=false;
+
 volatile uint32_t last_debounce_time_right = 0;
 volatile uint32_t last_debounce_time_left = 0;
+volatile uint32_t last_debounce_time_el = 0;
 void limit_switch_callback(uint gpio, uint32_t events){
     uint32_t current_time = time_us_32();
     if(gpio==_LIMIT_SWITCH_RIGHT){
@@ -951,6 +971,13 @@ void limit_switch_callback(uint gpio, uint32_t events){
             //printf("left");
             g_limit_switch_left_triggered = true;
             last_debounce_time_left = current_time;
+        }
+    }
+    else if(gpio==_LIMIT_SWITCH_ELEVATION){
+        if (current_time - last_debounce_time_el > DEBOUNCE_DELAY_MS) {
+            //printf("left");
+            g_limit_switch_el_triggered = true;
+            last_debounce_time_el = current_time;
         }
     }
     //printf("    %d   ,\n",time_us_32());
@@ -1229,12 +1256,12 @@ class elevation_lock{
     public:
         elevation_lock(uint el_lock_pin){
             this->pin=el_lock_pin;
-
+        }
+        void init(){
             gpio_set_function(pin, GPIO_FUNC_PWM);
             uint slice=pwm_gpio_to_slice_num(pin);
             pwm_set_wrap(slice,300);
             pwm_set_clkdiv(slice,16);
-            sleep_ms(5000);
             pwm_set_enabled(slice, true);
             pwm_set_gpio_level(pin,0);
         }
@@ -1249,6 +1276,34 @@ class elevation_lock{
     private:
         uint pin;
 };
+
+class storage_sys{
+    public:
+        storage_sys(extractor* associated_extractor, volatile bool* associated_limit_elevation, elevation_lock* associated_elevation_lock){
+            this->asoc_extract=associated_extractor;
+            this->asoc_el_lock=associated_elevation_lock;
+        }
+        void init(){
+            command_packet comm;
+            queue_remove_blocking(&comm_queue_10,&comm);
+            if(comm.command==9 && comm.arguments[0]==100){
+                //success
+                asoc_el_lock->init();
+                asoc_el_lock->release();
+            }
+            else{
+                //error
+                for(;;)
+                    printf("UNEXPECTED RESPONSE FROM CORE 1. UNSUCCESSFULL INIT\n");
+            }
+        }
+    private:
+        extractor* asoc_extract;
+        volatile bool *associated_limit_elevation;
+        elevation_lock* asoc_el_lock;
+        float LEVELS_OFFSETS[100];
+        float LEVELS_NUMBER;
+};
 //////////////////////////////////////////////////   MAIN LOOPS  ///////////////////////////////////////////////////////////////////////////////////////////
 void foc_second_core(){
     stdio_usb_init();
@@ -1258,8 +1313,15 @@ void foc_second_core(){
     bridge_driver drv(_PWM_A_PIN,_PWM_B_PIN,_PWM_C_PIN,_DRIVER_ENABLE_PIN);
     encoder encoder(spi0,_PIN_SCK,_PIN_CS,_PIN_MISO,_PIN_MOSI,true);
     foc_controller foc(&drv,&encoder, &cs,7,24,15,6);
+    
+    command_packet ready_command_packet;
+    ready_command_packet.command=9;
+    ready_command_packet.arguments[0]=100; 
+    queue_add_blocking(&comm_queue_10,&ready_command_packet); //send package to first core that we are ready to align
+    foc.man_rot(5);
+    foc.align();
 
-    foc.set_mode(3); 
+    foc.set_mode(3);
     foc.set_angle(0);
     foc.asoc_driver->enable();
     
@@ -1325,28 +1387,24 @@ int main()
 
     //multi core init stuff
     queue_init(&comm_queue_01,sizeof(command_packet),1);
+    queue_init(&comm_queue_10,sizeof(command_packet),1);
     multicore_launch_core1(foc_second_core);
 
     //adds limit switch interrupts for steppers
     add_limit_switch(_LIMIT_SWITCH_RIGHT);
     add_limit_switch(_LIMIT_SWITCH_LEFT);
+    add_limit_switch(_LIMIT_SWITCH_ELEVATION);
     
     //stepper driver initialization
     stepper_driver lstp(_STEP_PINA,_DIR_PINA,&g_limit_switch_left_triggered,1.8,4);
     stepper_driver rstp(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4);
 
     extractor extr(&lstp,&rstp,1940,2150);
+    
     elevation_lock el_lock(7);
-    // sleep_ms(2500);
-    while(1){
-        printf("rel\n");
-        el_lock.release();
-        sleep_ms(5000);
-        printf("lock\n");
-        el_lock.lock();
-        sleep_ms(5000);
-    }
-
+    
+    storage_sys st_sys(&extr,&g_limit_switch_el_triggered,&el_lock);
+    st_sys.init(); //waits for foc to be init
     extr.zero_motors();
     
     // lstp.set_dir(stepper_driver::CW);
