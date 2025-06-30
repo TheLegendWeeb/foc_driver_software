@@ -1232,8 +1232,9 @@ class elevation_lock{
 
             gpio_set_function(pin, GPIO_FUNC_PWM);
             pwm_config conf=pwm_get_default_config();
+            uint slice=pwm_gpio_to_slice_num(pin);
             pwm_config_set_wrap(&conf,100);
-            pwm_init(pwm_gpio_to_slice_num(pin),&conf,true);
+            pwm_init(slice,&conf,true);
             pwm_set_gpio_level(pin,0);
         }
         void release(){
@@ -1336,6 +1337,16 @@ int main()
     extractor extr(&lstp,&rstp,1940,2150);
     elevation_lock el_lock(_ELEVATION_LOCK_PIN);
     sleep_ms(2500);
+    
+    while(1){
+        printf("rel\n");
+        el_lock.release();
+        sleep_ms(5000);
+        printf("lock\n");
+        el_lock.lock();
+        sleep_ms(5000);
+    }
+
     extr.zero_motors();
     
     // lstp.set_dir(stepper_driver::CW);
