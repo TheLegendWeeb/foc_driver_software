@@ -966,7 +966,7 @@ class stepper_driver{
     public:
         int absolute_position_steps;
         bool moving;
-        stepper_driver(uint step_pin, uint dir_pin,volatile bool* asoc_limit_switch,float hw_angle_per_step=1.8,uint microstepping_mult=1,bool invert_dir=false){
+        stepper_driver(uint step_pin, uint dir_pin,volatile bool* asoc_limit_switch,float hw_angle_per_step=1.8,uint microstepping_mult=1,bool invert_dir=false,int center_pos){
             this->step_pin=step_pin;
             this->dir_pin=dir_pin;
             this->hw_angle_per_step=hw_angle_per_step;
@@ -976,6 +976,7 @@ class stepper_driver{
             this->moving=false;
             this->asoc_limit_switch=asoc_limit_switch;
 
+            this->offset_center=center_pos;
             gpio_init(step_pin);
             gpio_set_dir(step_pin,GPIO_OUT);
             gpio_put(step_pin,0);
@@ -1234,13 +1235,12 @@ int main()
     add_limit_switch(_LIMIT_SWITCH_LEFT);
     
     //stepper driver initialization
-    stepper_driver lstp(_STEP_PINA,_DIR_PINA,&g_limit_switch_left_triggered,1.8,4);
-    stepper_driver rstp(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4);
+    stepper_driver lstp(_STEP_PINA,_DIR_PINA,&g_limit_switch_left_triggered,1.8,4,false,1940);
+    stepper_driver rstp(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4,false,2150);
     sleep_ms(2500);
     lstp.zero_motor();
     rstp.zero_motor();
     
-    printf("RESET ABS VALUES %d %d \n",lstp.absolute_position_steps,rstp.absolute_position_steps);
     lstp.set_dir(stepper_driver::CW);
     rstp.set_dir(stepper_driver::CW);
     // lstp.move_mm(50,stepper_driver::CCW);
