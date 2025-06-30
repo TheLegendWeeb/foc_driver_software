@@ -1138,19 +1138,14 @@ class stepper_driver{
             return ((float)steps/steps_per_rot)*mm_per_rot;
         }
         //this should be uint but comparing it with an int promotes the int to uint and the comparison is always true
-        int max_position_steps = 35400; //placeholder 111111111111!!!!!!!!!!!!!!!
+        int max_position_steps = 3500; //placeholder 111111111111!!!!!!!!!!!!!!!
         int offset_other_tooth; //placeholder this is the offset in case i want to zero from the other side
         int offset_center; //placeholder this is the offset to get to the center position(the middle of the zone)
         //this function adds or subtracts steps from absolute position counter
         void increment_position(uint steps,direction dir){
             //cw is pos, ccw is neg
             int newpos=absolute_position_steps+steps*(dir==CW?1:-1);
-            if(newpos>max_position_steps){
-                newpos-=max_position_steps;
-            }
-            else if(newpos<0){
-                newpos+=max_position_steps;
-            }
+            newpos=(newpos % max_position_steps + max_position_steps) % max_position_steps;
             absolute_position_steps=newpos;
         }   
 
