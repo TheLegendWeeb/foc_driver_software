@@ -1035,9 +1035,16 @@ class stepper_driver{
             uint steps=mm_to_steps(mm);
             move(steps,dir);
         }
+        //moves by x steps; direction is determined by sign
         void move_int(int steps){
             direction dir=(steps>0) ? CW : CCW;
             move(abs(steps),dir);
+        }
+        //moves to reach an absolute position going in a specified direction (might not be needed)
+        void move_to_pos(uint abs_position,direction direction){
+            set_dir(direction);
+            int steps=absolute_position_steps-abs_position;
+            // move();
         }
         // function to zero stepper with a limit switch
         void zero_motor(){
@@ -1158,16 +1165,56 @@ class extractor{
             this->asoc_right_step=associated_right_step;
             this->center_offset_left=center_offset_left;
             this->center_offset_right=center_offset_right;
+            
+            this->has_payload=false;
         }
         void zero_motors(){
             asoc_left_step->zero_motor();
             asoc_right_step->zero_motor();
-            asoc_left_step->move(center_offset_left,stepper_driver::CW);
-            asoc_right_step->move(center_offset_right,stepper_driver::CW);
+            //move teeth to "stowed" position
+            asoc_left_step->move(center_offset_left-(3500/2),stepper_driver::CW);
+            asoc_right_step->move(center_offset_right-(3500/2),stepper_driver::CW);
         }
         void loop(){
             asoc_left_step->loop();
             asoc_right_step->loop();
+        }
+
+        //procedures
+        bool has_payload;
+        void extract_back(){
+            if(has_payload){
+                //"error"
+                return;
+            }
+            asoc_left_step->move_int(1750);
+            asoc_right_step->move_int(1750);
+            
+            has_payload=true;
+        }
+        void insert_back(){
+            if(!has_payload){
+                return;
+            }
+            asoc_left_step->move_int(-1750);
+            asoc_right_step->move_int(-1750);
+            has_payload=false;
+        }
+        void extract_front(){
+            if(has_payload){
+                return;
+            }
+            asoc_left_step->move_int(-1750);
+            asoc_right_step->move_int(-1750);
+            has_payload=true;
+        }
+        void insert_front(){
+            if(!has_payload){
+                return;
+            }
+            asoc_left_step->move_int(1750);
+            asoc_right_step->move_int(1750);
+            has_payload=false;
         }
     private:
         stepper_driver* asoc_left_step;
