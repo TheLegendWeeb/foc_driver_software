@@ -973,20 +973,29 @@ void limit_switch_callback(uint gpio, uint32_t events){
             last_debounce_time_left = current_time;
         }
     }
-    else if(gpio==_LIMIT_SWITCH_ELEVATION){
+    //printf("    %d   ,\n",time_us_32());
+}
+void el_switch_callback(uint gpio, uint32_t events){
+    uint32_t current_time = time_us_32();
+    if(gpio==_LIMIT_SWITCH_ELEVATION){
         if (current_time - last_debounce_time_el > DEBOUNCE_DELAY_MS) {
-            //printf("left");
+            printf("elevation");
             g_limit_switch_el_triggered = true;
             last_debounce_time_el = current_time;
         }
     }
-    //printf("    %d   ,\n",time_us_32());
 }
 void add_limit_switch(uint pin){
     gpio_init(pin);
     gpio_set_dir(pin,GPIO_IN);
     gpio_pull_down(pin);
     gpio_set_irq_enabled_with_callback(pin, GPIO_IRQ_EDGE_RISE, true, limit_switch_callback);
+}
+void add_ev_switch(uint pin){
+    gpio_init(pin);
+    gpio_set_dir(pin,GPIO_IN);
+    gpio_pull_down(pin);
+    gpio_set_irq_enabled_with_callback(pin, GPIO_IRQ_EDGE_FALL, true, el_switch_callback);
 }
 
 // class for A4988 stepper driver
@@ -1282,6 +1291,8 @@ class storage_sys{
         storage_sys(extractor* associated_extractor, volatile bool* associated_limit_elevation, elevation_lock* associated_elevation_lock){
             this->asoc_extract=associated_extractor;
             this->asoc_el_lock=associated_elevation_lock;
+            this->asoc_limit_elevation=associated_limit_elevation;
+            current_platform_angle=0;
         }
         void init(){
             command_packet comm;
@@ -1296,13 +1307,27 @@ class storage_sys{
                 for(;;)
                     printf("UNEXPECTED RESPONSE FROM CORE 1. UNSUCCESSFULL INIT\n");
             }
+            sleep_ms(1000);
+            comm.command=1;
+            *asoc_limit_elevation=0;
+            while(!*asoc_limit_elevation){
+                current_platform_angle-=0.05;
+                comm.arguments[0]=current_platform_angle;
+                queue_add_blocking(&comm_queue_01,&comm);
+                sleep_ms(100);
+            }
+            negative_zero_offset=shared_monitoring_data.angle[1];
+            comm.arguments[0]=3;
+            queue_add_blocking(&comm_queue_01,&comm);
         }
     private:
         extractor* asoc_extract;
-        volatile bool *associated_limit_elevation;
+        volatile bool *asoc_limit_elevation;
         elevation_lock* asoc_el_lock;
         float LEVELS_OFFSETS[100];
         float LEVELS_NUMBER;
+        float negative_zero_offset;
+        float current_platform_angle;
 };
 //////////////////////////////////////////////////   MAIN LOOPS  ///////////////////////////////////////////////////////////////////////////////////////////
 void foc_second_core(){
@@ -1318,9 +1343,8 @@ void foc_second_core(){
     ready_command_packet.command=9;
     ready_command_packet.arguments[0]=100; 
     queue_add_blocking(&comm_queue_10,&ready_command_packet); //send package to first core that we are ready to align
-    foc.man_rot(5);
+    foc.man_rot(1);
     foc.align();
-
     foc.set_mode(3);
     foc.set_angle(0);
     foc.asoc_driver->enable();
@@ -1389,11 +1413,11 @@ int main()
     queue_init(&comm_queue_01,sizeof(command_packet),1);
     queue_init(&comm_queue_10,sizeof(command_packet),1);
     multicore_launch_core1(foc_second_core);
-
+    
     //adds limit switch interrupts for steppers
     add_limit_switch(_LIMIT_SWITCH_RIGHT);
     add_limit_switch(_LIMIT_SWITCH_LEFT);
-    add_limit_switch(_LIMIT_SWITCH_ELEVATION);
+    add_ev_switch(_LIMIT_SWITCH_ELEVATION);
     
     //stepper driver initialization
     stepper_driver lstp(_STEP_PINA,_DIR_PINA,&g_limit_switch_left_triggered,1.8,4);
