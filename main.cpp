@@ -1232,20 +1232,19 @@ class elevation_lock{
 
             gpio_set_function(pin, GPIO_FUNC_PWM);
             uint slice=pwm_gpio_to_slice_num(pin);
-            pwm_set_wrap(slice,1250);
+            pwm_set_wrap(slice,300);
+            pwm_set_clkdiv(slice,16);
             sleep_ms(5000);
             pwm_set_enabled(slice, true);
             pwm_set_gpio_level(pin,0);
         }
         void release(){
-            printf("fuck\n");
-            pwm_set_gpio_level(pin,1200);
-            sleep_ms(1000);
             pwm_set_gpio_level(pin,300);
+            sleep_ms(1000);
+            pwm_set_gpio_level(pin,100);
         }
         void lock(){
-            return;
-            //pwm_set_gpio_level(pin,0);
+            pwm_set_gpio_level(pin,0);
         }
     private:
         uint pin;
@@ -1339,16 +1338,13 @@ int main()
     extractor extr(&lstp,&rstp,1940,2150);
     elevation_lock el_lock(7);
     // sleep_ms(2500);
-    
-    el_lock.release();
     while(1){
-
         printf("rel\n");
-        // el_lock.release();
-        // sleep_ms(5000);
-        // printf("lock\n");
-        // el_lock.lock();
-        // sleep_ms(5000);
+        el_lock.release();
+        sleep_ms(5000);
+        printf("lock\n");
+        el_lock.lock();
+        sleep_ms(5000);
     }
 
     extr.zero_motors();
