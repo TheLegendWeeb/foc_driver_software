@@ -1231,19 +1231,20 @@ class elevation_lock{
             this->pin=el_lock_pin;
 
             gpio_set_function(pin, GPIO_FUNC_PWM);
-            pwm_config conf=pwm_get_default_config();
             uint slice=pwm_gpio_to_slice_num(pin);
-            pwm_config_set_wrap(&conf,100);
-            pwm_init(slice,&conf,true);
+            pwm_set_wrap(slice,3000);
+            pwm_set_enabled(slice, true);
             pwm_set_gpio_level(pin,0);
         }
         void release(){
-            pwm_set_gpio_level(pin,100);
+            printf("fuck\n");
+            pwm_set_gpio_level(pin,2900);
             sleep_ms(1000);
-            pwm_set_gpio_level(pin,33);
+            pwm_set_gpio_level(pin,1000);
         }
         void lock(){
-            pwm_set_gpio_level(pin,0);
+            return;
+            //pwm_set_gpio_level(pin,0);
         }
     private:
         uint pin;
@@ -1335,16 +1336,18 @@ int main()
     stepper_driver rstp(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4);
 
     extractor extr(&lstp,&rstp,1940,2150);
-    elevation_lock el_lock(_ELEVATION_LOCK_PIN);
+    elevation_lock el_lock(7);
     sleep_ms(2500);
     
+    el_lock.release();
     while(1){
+
         printf("rel\n");
-        el_lock.release();
-        sleep_ms(5000);
-        printf("lock\n");
-        el_lock.lock();
-        sleep_ms(5000);
+        // el_lock.release();
+        // sleep_ms(5000);
+        // printf("lock\n");
+        // el_lock.lock();
+        // sleep_ms(5000);
     }
 
     extr.zero_motors();
@@ -1367,7 +1370,7 @@ int main()
     // monitoring_mask=0b0000001110000;
 
     int i=0;
-    while (true) {
+    while(true) {
         uart_check_command();
         //stepper commands
         if(core0cmd_rcv){
