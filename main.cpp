@@ -41,6 +41,8 @@
 #define _LIMIT_SWITCH_LEFT 5
 #define _LIMIT_SWITCH_ELEVATION 6
 
+//elevation lock pin
+#define _ELEVATION_LOCK_PIN 7
 //UART defines
 #define _UART_ID uart1
 #define _BAUD_RATE 115200
@@ -1221,6 +1223,30 @@ class extractor{
         int center_offset_left;
         int center_offset_right;
 };
+
+//class that manages the elevation lock
+class elevation_lock{
+    public:
+        elevation_lock(uint el_lock_pin){
+            this->pin=el_lock_pin;
+
+            gpio_set_function(pin, GPIO_FUNC_PWM);
+            pwm_config conf=pwm_get_default_config();
+            pwm_config_set_wrap(&conf,100);
+            pwm_init(pwm_gpio_to_slice_num(pin),&conf,true);
+            pwm_set_gpio_level(pin,0);
+        }
+        void release(){
+            pwm_set_gpio_level(pin,100);
+            sleep_ms(1000);
+            pwm_set_gpio_level(pin,33);
+        }
+        void lock(){
+            pwm_set_gpio_level(pin,0);
+        }
+    private:
+        uint pin;
+};
 //////////////////////////////////////////////////   MAIN LOOPS  ///////////////////////////////////////////////////////////////////////////////////////////
 void foc_second_core(){
     stdio_usb_init();
@@ -1308,6 +1334,7 @@ int main()
     stepper_driver rstp(_STEP_PINB,_DIR_PINB,&g_limit_switch_right_triggered,1.8,4);
 
     extractor extr(&lstp,&rstp,1940,2150);
+    elevation_lock el_lock(_ELEVATION_LOCK_PIN);
     sleep_ms(2500);
     extr.zero_motors();
     
