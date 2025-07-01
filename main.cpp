@@ -267,6 +267,22 @@ void uart_check_command(){
                 core0command.command=2;
                 core0cmd_rcv=1;
             }
+            else if(uart_message[index]=='K'){ //temp stepper command
+                index++;
+                char argument[30];
+                uint arg_index=0;
+                
+                // char valid_char[20]="0123456789.-";  //maybe this is cleaner and use with strchr   ALSO maybe make this a function because converting a segment of string to float is done frequently
+                while((uart_message[index]>='0' && uart_message[index]<='9') || uart_message[index]=='.' || uart_message[index]=='-'){
+                    argument[arg_index]=uart_message[index];
+                    index++;
+                    arg_index++;                    
+                } 
+                core0command.arguments[0] = strtof(argument, NULL);
+                // printf("NEW TARGET: %f\n",cmd_packet.arguments[0]);
+                core0command.command=3;
+                core0cmd_rcv=1;
+            }
             else if(uart_message[index]==' '){ //if whitespace, skip
                 index++;
             }
@@ -689,7 +705,7 @@ class PIController{
 //class for foc algorithm
 class foc_controller{
     public:
-        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance, float angle_ramp):current_controller(50.0f,1000.0f,14.0f,9999.0f),iq_filter(0.01f),vel_controller(-0.05f,-0.04,1.4f,990.0f),angle_controller(15,40,45.0f,999.0f){
+        foc_controller(bridge_driver* associated_driver, encoder* associated_encoder, current_sensors* associated_current_sensors, uint motor_pole_pairs, uint power_supply_voltage, float phase_resistance, float angle_ramp):current_controller(50.0f,1000.0f,14.0f,9999.0f),iq_filter(0.01f),vel_controller(-0.05f,-0.04,1.6f,990.0f),angle_controller(15,40,45.0f,999.0f){
             this->asoc_driver=associated_driver;
             this->asoc_encoder=associated_encoder;
             this->asoc_cs=associated_current_sensors;
@@ -977,26 +993,26 @@ void limit_switch_callback(uint gpio, uint32_t events){
     uint32_t current_time = time_us_32();
     if(gpio==_LIMIT_SWITCH_RIGHT){
         if (current_time - last_debounce_time_right > DEBOUNCE_DELAY_MS) {
-            printf("right        ");
+            //printf("right        ");
             g_limit_switch_right_triggered = true;
             last_debounce_time_right = current_time;
         }
     }
     else if(gpio==_LIMIT_SWITCH_LEFT){
         if (current_time - last_debounce_time_left > DEBOUNCE_DELAY_MS) {
-            printf("left");
+            //printf("left");
             g_limit_switch_left_triggered = true;
             last_debounce_time_left = current_time;
         }
     }
     else if(gpio==_LIMIT_SWITCH_ELEVATION){
         if (current_time - last_debounce_time_el > DEBOUNCE_DELAY_MS) {
-            printf("elevation");
+            //printf("elevation");
             g_limit_switch_el_triggered = true;
             last_debounce_time_el = current_time;
         }
     }
-    printf("    %d   ,\n",time_us_32());
+    //printf("    %d   ,\n",time_us_32());
 }
 void add_limit_switch(uint pin){
     gpio_init(pin);
@@ -1331,24 +1347,32 @@ class storage_sys{
             }
             negative_zero_offset=shared_monitoring_data.angle[1];
             current_rel_angle=0;
-            move_rel_angle(5);
             sleep_ms(2000);
-            move_rel_angle(1);
+            move_rel_angle(0);
         }
         float current_rel_angle;
         void move_rel_angle(float angle){
-            command_packet comm_packet;
-            comm_packet.command=1;
-            comm_packet.arguments[0]=angle+negative_zero_offset;
-            queue_add_blocking(&comm_queue_01,&comm_packet);
-            current_rel_angle=angle;
+            if(angle>=0){
+                command_packet comm_packet;
+                comm_packet.command=1;
+                comm_packet.arguments[0]=angle+negative_zero_offset;
+                queue_add_blocking(&comm_queue_01,&comm_packet);
+                current_rel_angle=angle;
+            }
+        }
+        uint current_level;
+        void move_level(uint level){
+            if(level>=0){
+                current_level=level;
+                move_rel_angle(this->LEVELS_OFFSETS[level]);
+            }
         }
     private:
         extractor* asoc_extract;
         volatile bool *asoc_limit_elevation;
         elevation_lock* asoc_el_lock;
-        float LEVELS_OFFSETS[100];
-        float LEVELS_NUMBER;
+        const uint LEVELS_NUMBER=5;
+        const float LEVELS_OFFSETS[5]={2.5,2.5,6.8,2.5,11.5}; ///lvl 1,3 doesnt work
         float negative_zero_offset;
         float current_platform_angle;
 };
@@ -1369,14 +1393,12 @@ void foc_second_core(){
     foc.man_rot(1);
     foc.align();
     foc.set_mode(3);
-    foc.set_angle(2);
     foc.asoc_driver->enable();
     
     command_packet comm_packet;
     while(true){
         //listen for commands from core 0
         if(!queue_is_empty(&comm_queue_01)){
-            printf("rcv");
             queue_remove_blocking(&comm_queue_01,&comm_packet);
             if(comm_packet.command==0){// new mode
                 foc.set_mode(comm_packet.arguments[0]);
@@ -1501,27 +1523,12 @@ int main()
             }
             else if(core0command.command==2){
                 st_sys.move_rel_angle(core0command.arguments[0]);
-                printf("CURR ANGLE: %f\n",st_sys.current_rel_angle);
+            }else if(core0command.command==3){
+                st_sys.move_level(core0command.arguments[0]);
             }
             core0cmd_rcv=0;
         }
-        // handle_monitoring(monitoring_mask); //monitoring segment
-
-    
-        
-        /// alternate stepper rotations
-        // if(!lstp.moving && !rstp.moving){
-        //     sleep_ms(1000);
-        //     if(i){
-        //         lstp.move((int)5*200*4,stepper_driver::CCW);
-        //         rstp.move((int)5*200*4,stepper_driver::CW);
-        //     }
-        //     else{
-        //         lstp.move((int)5*200*4,stepper_driver::CW);
-        //         rstp.move((int)5*200*4,stepper_driver::CCW);
-        //     }
-        //     i=!i;
-        // }
+        handle_monitoring(monitoring_mask); //monitoring segment
 
         // reset limit switches... temp?
         // if(g_limit_switch_right_triggered){
